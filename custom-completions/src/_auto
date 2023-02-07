@@ -1,0 +1,57 @@
+#compdef auto
+
+_auto() {
+  local line state subcmd
+  _arguments -C "1: :->cmds" "*::arg:->args"
+  case "$state" in
+    (cmds)
+      _values 'auto command' \
+              'install[Install packages.]' \
+              'update[Update packages.]' \
+              'search[Search package in remote repositories.]' \
+              'remove[Uninstall packages.]' \
+              'clean[Clean up unused packages and cache.]' \
+              'which[Query which package provides a certain command.]' \
+              'info[Query information of packges.]' \
+              'help[Display short help messages.]';;
+    (args)
+      subcmd="$line[1]"
+      (( $+functions[_auto_$subcmd] )) && _auto_$subcmd;;
+  esac
+}
+
+_auto_remote_packages() {
+  local -a pkgs
+  local prefix="$PREFIX"
+  if [[ -z "$prefix" ]]; then
+    pkgs=($(yay -Slq))
+  else
+    pkgs=($(yay -Slq | grep $prefix))
+  fi
+  _describe "packges" pkgs
+}
+
+_auto_local_packages() {
+  local -a pkgs
+  local prefix="$PREFIX"
+  if [[ -z "$prefix" ]]; then
+    pkgs=($(yay -Qq))
+  else
+    pkgs=($(yay -Qq | grep $prefix))
+  fi
+  _describe "packages" pkgs
+}
+
+_auto_install() { _auto_remote_packages }
+
+_auto_update() { _auto_local_packages }
+
+_auto_search() { _auto_remote_packages }
+
+_auto_remove() { _auto_local_packages }
+
+_auto_clean() { }
+
+_auto_which() { _path_commands }
+
+_auto_info() { _auto_local_packages }

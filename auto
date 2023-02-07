@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+declare AUR_HELPER SUDO
+readonly TITLE_SIZE=80
+
+exit_usage() {
+    (( $# == 1 )) || exit_usage 1
+    echo 'Usage: auto [install|update|search|remove|clean|which|info] [paramters...]'
+    exit "$1"
+}
+
+title_echo() {
+    local contents="$*"
+    local size="${#contents}"
+    local dash_size1 dash_size2 i
+    (( dash_size1 = (TITLE_SIZE - size) / 2 ))
+    (( dash_size2 = (TITLE_SIZE - size) % 2 == 0 ? dash_size1 : dash_size1 + 1 ))
+    tput bold
+    for (( i = 0; i < dash_size1; i++ )); do
+        echo -n '⎼'
+    done
+    echo -n " $contents "
+    for (( i = 0; i < dash_size2; i++ )); do
+        echo -n '⎼'
+    done
+    echo
+    tput sgr0
+}
+
+subtitle_echo() {
+    local contents="$*"
+    tput bold
+    tput setaf 4
+    echo -n ':: '
+    tput setaf 15
+    echo "$contents"
+    tput sgr0
+}
+
+
+cmd_exists() {
+    command -v "$1" &> /dev/null
+}
+
+find_helper() {
+    if cmd_exists 'paru'; then
+        AUR_HELPER='paru'
+    elif cmd_exists 'yay'; then
+        AUR_HELPER='yay'
+    else
+        echo 'Error: No AUR helper found.'
+        exit 2
+    fi
+}
+
+find_sudo() {
+    if cmd_exists 'sudo'; then
+        SUDO='sudo'
+    elif cmd_exists 'doas'; then
+        SUDO='doas'
+    fi
+}
+
+perform_install() {
+    (( $# > 0 )) || exit_usage 1
+    local pkgs=("$@")
+    local assert_flatpak=0
+    local pkg
+    for pkg in "${pkgs[@]}"; do
+        case "$pkg" in
+            ('-f' | '--flatpak') assert_flatpak=1;;
+        esac
+    done
+    for pkg in "${pkgs[@]}"; do
+        [[ "${pkg:0:1}" == '-' ]] && continue
+        if (( assert_flatpak == 1 )); then
+            title_echo "Installing Flatpak package $pkg..."
+            flatpak install "$pkg"
+        else
+            title_echo "Installing native package $pkg..."
+            $AUR_HELPER -S "$pkg"
+        fi
+    done
+}
+
+update_custom_zsh_plugins() {
+    local dir plugin
+    local ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
+    for dir in "$ZSH_CUSTOM/plugins"/*; do
+        [[ -e "$dir/.git" ]] || continue
+        plugin="$(basename "$dir")"
+        subtitle_echo "Updating plugin $plugin..."
+        (cd "$dir" || return; git pull)
+    done
+}
+
+update_vim_plugins() {
+    subtitle_echo 'Updating remote plugins...'
+    nvim --headless -c ':UpdateRemotePlugins | :qa'
+    echo
+    subtitle_echo 'Updating Vim Plug...'
+    nvim --headless -c ':PlugUpgrade | :PlugUpdate | :qa'
+    echo
+    subtitle_echo 'Updating COC plugins...'
+    nvim --headless -c ':CocUpdateSync | :qa'
+    echo
+}
+
+perform_update() {
+    local pkgs=("$@")
+    local pkg
+    if [[ -z "${pkgs[*]}" ]]; then
+        title_echo 'Updating native packages...'
+        $AUR_HELPER -Syu --devel
+        title_echo 'Updating pachage file database...'
+        $SUDO pkgfile -u
+        title_echo 'Updating Flatpak packages...'
+        flatpak update
+        title_echo 'Updating custom ZSH plugins...'
+        update_custom_zsh_plugins
+        title_echo 'Updating Neovim plugins...'
+        update_vim_plugins
+        echo 'Done.'
+        exit
+    fi
+    local assert_flatpak=0
+    for pkg in "${pkgs[@]}"; do
+        case "$pkg" in
+            ('-f' | '--flatpak') assert_flatpak=1;;
+        esac
+    done
+    for pkg in "${pkgs[@]}"; do
+        [[ "${pkg:0:1}" == '-' ]] && continue
+        if [[ "$assert_flatpak" == 1 ]]; then
+            title_echo "Updating Flatpak package $pkg..."
+            flatpak update "$pkg"
+        else
+            title_echo "Updating native package $pkg..."
+            $AUR_HELPER -Syu "$pkg"
+        fi
+    done
+}
+
+perform_search() {
+    (( $# > 0 )) || exit_usage 1
+    local name="$*"
+    title_echo 'In system repositories:'
+    $AUR_HELPER -Ss "$name"
+    title_echo 'In Flatpak repositories:'
+    flatpak search "$name"
+}
+
+perform_autoremove() {
+    local aur_flags='' flatpak_flags='' pkgs
+    if (( $# > 0 )) && [[ "$1" == '-y' ]]; then
+        aur_flags='--noconfirm'
+        flatpak_flags='-y'
+        shift
+    fi
+    title_echo 'Autoremoving native packages...'
+    pkgs="$($AUR_HELPER -Qdtq | awk '{print $1}')"
+    if [[ -z "$pkgs" ]]; then
+        echo 'No native packages can be autoremoved.'
+    else
+        echo "$pkgs" | $AUR_HELPER -Rscn $aur_flags -
+    fi
+    title_echo 'Autoremoving Flatpak packages...'
+    flatpak uninstall --unused --delete-data $flatpak_flags
+}
+
+perform_remove() {
+    if (( $# == 0 )); then
+        perform_autoremove
+        return
+    fi
+    local pkgs=("$@") assert_flatpak=0
+    for pkg in "${pkgs[@]}"; do
+        case "$pkg" in
+            ('-f' | '--flatpak') assert_flatpak=1;;
+        esac
+    done
+    for pkg in "$@"; do
+        [[ "${pkg:0:1}" == '-' ]] && continue
+        if [[ "$assert_flatpak" == 1 ]]; then
+            title_echo "Uninstalling Flatpak package $pkg..."
+            # shellcheck disable=SC2086
+            flatpak remove $pkg --delete-data
+        else
+            title_echo "Uninstalling native package $pkg..."
+            # shellcheck disable=SC2086
+            $AUR_HELPER -Rscn $pkg
+        fi
+    done
+}
+
+perform_clean() {
+    title_echo 'Performing autoremove...'
+    perform_autoremove -y
+    title_echo 'Cleaning cache...'
+    yes | $AUR_HELPER -Sccd
+    echo
+}
+
+perform_which() {
+    (( $# > 0 )) || exit_usage 1
+    local pkgs=("$@") pkg
+    for pkg in "${pkgs[@]}"; do
+        $AUR_HELPER -Qo "$(which "$pkg")"
+    done
+}
+
+perform_info() {
+    (( $# > 0 )) || exit_usage 1
+    local pkgs=("$@") selected matched assert_flatpak=0
+    for pkg in "${pkgs[@]}"; do
+        case "$pkg" in
+            ('-f' | '--flatpak') assert_flatpak=1;;
+        esac
+    done
+    for pkg in "${pkgs[@]}"; do
+        [[ "${pkg:0:1}" == '-' ]] && continue
+        if [[ "$assert_flatpak" == 1 ]]; then
+            subtitle_echo "Querying information on flatpak package $pkg..."
+            declare -a matched=()
+            readarray -t matched <<< \
+                "$(flatpak list --columns=application \
+                    | sed '1d' \
+                    | grep -i "$pkg")"
+            if [[ -z "${matched[*]}" ]]; then
+                echo "Flatpak package $pkg not found."
+            elif (( "${#matched[@]}" == 1 )); then
+                selected="${matched[*]}"
+                echo "Selected Ref: $selected"
+                flatpak info "$selected"
+            else
+                selected="$(printf '%s\n' "${matched[@]}" \
+                    | fzf --header="Multiple packages matched! Please select:")"
+                echo "Selected Ref: $selected"
+                flatpak info "$selected"
+            fi
+        else
+            subtitle_echo "Querying information on native package $pkg..."
+            $AUR_HELPER -Si "$pkg"
+        fi
+    done
+}
+
+main() {
+    (( $# > 0 )) || exit_usage 1
+    find_helper
+    find_sudo
+    case "$1" in
+        ('install')   shift; perform_install "$@";;
+        ('update')    shift; perform_update "$@";;
+        ('search')    shift; perform_search "$@";;
+        ('remove')    shift; perform_remove "$@";;
+        ('Uninstall') shift; perform_remove "$@";;
+        ('clean')     shift; perform_clean "$@";;
+        ('which')     shift; perform_which "$@";;
+        ('info')      shift; perform_info "$@";;
+        ('help')      exit_usage 0;;
+        (*)           exit_usage 1;;
+    esac
+}
+
+main "$@"
+
