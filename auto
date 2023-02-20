@@ -175,22 +175,27 @@ perform_remove() {
         perform_autoremove
         return
     fi
-    local pkgs=("$@") assert_flatpak=0
+    local pkgs=("$@") assert_flatpak=0 assert_regex=0
     for pkg in "${pkgs[@]}"; do
         case "$pkg" in
             ('-f' | '--flatpak') assert_flatpak=1;;
+            ('-r' | '--regex') assert_regex=1;;
         esac
     done
     for pkg in "$@"; do
         [[ "${pkg:0:1}" == '-' ]] && continue
-        if [[ "$assert_flatpak" == 1 ]]; then
+        if (( assert_flatpak == 1 )); then
             title_echo "Uninstalling Flatpak package $pkg..."
             # shellcheck disable=SC2086
             flatpak remove $pkg --delete-data
         else
             title_echo "Uninstalling native package $pkg..."
             # shellcheck disable=SC2086
-            $AUR_HELPER -Rscn $pkg
+            if (( assert_regex == 1 )); then
+                $AUR_HELPER -Qnq | grep -E "$pkg" | $AUR_HELPER -Rscn -
+            else
+                $AUR_HELPER -Rscn $pkg
+            fi
         fi
     done
 }
