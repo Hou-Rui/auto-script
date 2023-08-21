@@ -6,9 +6,13 @@ declare -A SRC=([native]=u [flatpak]=u [zsh]=u [vim]=u)
 declare F_REGEX=n F_NO_CONFIRM=n AUR_HELPER SUDO
 readonly TITLE_SIZE=80
 
+function my_grep {
+  grep -Ei -- "$*"
+}
+
 function title_echo {
   local contents="$*"
-  local size="${#contents}" size1 size2
+  local size=${#contents} size1 size2
   (( size1 = (TITLE_SIZE - size) / 2 ))
   (( size2 = (TITLE_SIZE - size) % 2 == 0 ? size1 : size1 + 1 ))
   tput bold
@@ -77,23 +81,23 @@ function src_default_all {
 }
 
 function find_aur_helper {
-  local helper aur_helpers=('yay' 'paru' 'pacman')
+  local helper aur_helpers=(yay paru pacman)
   for helper in "${aur_helpers[@]}"; do
     command -v "$helper" &> /dev/null || continue
     AUR_HELPER="$helper"
     return
   done
-  exit_msg "No Pacman / AUR helper found!"
+  exit_msg 'No Pacman / AUR helper found!'
 }
 
 function find_sudo {
-  local util utils=('sudo' 'doas' 'pacman')
+  local util utils=(sudo doas)
   for util in "${utils[@]}"; do
     command -v "$util" &> /dev/null || continue
     SUDO="$util"
     return
   done
-  exit_msg "No sudo utility found!"
+  exit_msg 'No sudo utility found!'
 }
 
 function exit_msg {
@@ -117,23 +121,22 @@ function exit_src_not_applicable {
 function subcmd_install {
   src_exclusive
   src_default native
-  local pkgs="$*"
-  [[ -z $pkgs ]] && exit_no_package_names
+  local pkgs
+  read -ra pkgs <<< "$*"
+  [[ -z ${pkgs[*]} ]] && exit_no_package_names
   if src_set native; then
-    title_echo "Installing native package $pkgs..."
-    # shellcheck disable=2086
+    title_echo "Installing native package ${pkgs[*]}..."
     if [[ $F_NO_CONFIRM == n ]]; then
-      $AUR_HELPER -S $pkgs
+      $AUR_HELPER -S "${pkgs[@]}"
     else
-      $AUR_HELPER -Syy $pkgs
+      $AUR_HELPER -Syy "${pkgs[@]}"
     fi
   elif src_set flatpak; then
-    title_echo "Installing Flatpak package $pkgs..."
-    # shellcheck disable=2086
+    title_echo "Installing Flatpak package ${pkgs[*]}..."
     if [[ $F_NO_CONFIRM == n ]]; then
-      flatpak install $pkgs
+      flatpak install "${pkgs[@]}"
     else
-      flatpak install --assumeyes $pkgs
+      flatpak install --assumeyes "${pkgs[@]}"
     fi
   else
     exit_src_not_applicable
@@ -142,20 +145,36 @@ function subcmd_install {
 
 function subcmd_search {
   src_default native flatpak
-  local pkgs="$*"
+  local pkgs
+  read -ra pkgs <<< "$*"
   if src_set native; then
-    title_echo "Searching native package $pkgs..."
-    # shellcheck disable=2086
-    $AUR_HELPER -Ss $pkgs
+    title_echo "Searching native package ${pkgs[*]}..."
+    $AUR_HELPER -Ss "${pkgs[@]}"
     SRC[native]=u
   fi
   if src_set flatpak; then
-    title_echo "Searching Flatpak package $pkgs..."
-    # shellcheck disable=2086
-    flatpak search $pkgs
+    title_echo "Searching Flatpak package ${pkgs[*]}..."
+    flatpak search "${pkgs[@]}"
     SRC[flatpak]=u
   fi
   src_none_set || exit_src_not_applicable
+}
+
+function update_flatpak_pkgs {
+  if [[ $F_NO_CONFIRM == n ]]; then
+    flatpak update
+  else
+    flatpak update --assumeyes
+  fi
+  $SUDO pkgfile -u
+}
+
+function update_native_pkgs {
+  if [[ $F_NO_CONFIRM == n ]]; then
+    $AUR_HELPER -Syu --devel
+  else
+    $AUR_HELPER -Syu --devel --noconfirm
+  fi
 }
 
 function update_custom_zsh_plugins {
@@ -180,13 +199,11 @@ function subcmd_update {
   src_default_all
   if src_set native; then
     title_echo 'Updating native packages...'
-    $AUR_HELPER -Syu --devel
-    title_echo 'Updating pachage file database...'
-    $SUDO pkgfile -u
+    update_native_pkgs
   fi
   if src_set flatpak; then
     title_echo 'Updating Flatpak packages...'
-    flatpak update
+    update_flatpak_pkgs
   fi
   if src_set zsh; then
     title_echo 'Updating ZSH plugins...'
@@ -201,22 +218,21 @@ function subcmd_update {
 function subcmd_remove {
   src_exclusive
   src_default native
-  local pkgs="$*"
-  if [[ -z $pkgs ]]; then
+  local pkgs
+  read -ra pkgs <<< "$*"
+  if [[ -z ${pkgs[*]} ]]; then
     subcmd_autoremove
     return
   fi
   if src_set native; then
-    title_echo "Removing native package $pkgs..."
-    # shellcheck disable=2086
-    case "$F_REGEX" in
-      (n) $AUR_HELPER -Rscn $pkgs;;
-      (*) $AUR_HELPER -Qnq | grep -E "$pkgs" | $AUR_HELPER -Rscn -;;
+    title_echo "Removing native package ${pkgs[*]}..."
+    case $F_REGEX in
+      (n) $AUR_HELPER -Rscn "${pkgs[@]}";;
+      (*) $AUR_HELPER -Qnq | my_grep "${pkgs[*]}" | $AUR_HELPER -Rscn -;;
     esac
   elif src_set flatpak; then
-    title_echo "Removing Flatpak package $pkgs..."
-    # shellcheck disable=2086
-    flatpak uninstall --delete-data $pkgs
+    title_echo "Removing Flatpak package ${pkgs[*]}..."
+    flatpak uninstall --delete-data "${pkgs[@]}"
   else
     exit_src_not_applicable
   fi
@@ -258,16 +274,17 @@ function subcmd_info {
   src_exclusive
   src_default native
   (( $# > 0 )) || exit_usage 1
-  local pkgs="$*" selected matched
+  local pkgs selected matched
+  read -ra pkgs <<< "$*"
   if src_set flatpak; then
-    subtitle_echo "Querying information on flatpak package $pkgs..."
+    subtitle_echo "Querying information on flatpak package ${pkgs[*]}..."
     declare -a matched=()
     readarray -t matched <<< \
       "$(flatpak list --columns=application \
         | sed '1d' \
-        | grep -i "$pkgs")"
+        | my_grep "${pkgs[*]}")"
     if [[ -z ${matched[*]} ]]; then
-      echo "Flatpak package $pkgs not found."
+      echo "Flatpak package ${pkgs[*]} not found."
     elif (( ${#matched[@]} == 1 )); then
       selected="${matched[*]}"
       echo "Selected Ref: $selected"
@@ -279,11 +296,34 @@ function subcmd_info {
       flatpak info "$selected"
     fi
   elif src_set native; then
-    subtitle_echo "Querying information on native package $pkgs..."
-    $AUR_HELPER -Si "$pkgs"
+    subtitle_echo "Querying information on native package ${pkgs[*]}..."
+    $AUR_HELPER -Si "${pkgs[@]}"
   else
     exit_src_not_applicable
   fi
+}
+
+function subcmd_list {
+  src_default native flatpak
+  local pkgs
+  read -ra pkgs <<< "$*"
+  if src_set native; then
+    if [[ -z ${pkgs[*]} ]]; then
+      yay -Q
+    else
+      yay -Q | my_grep "${pkgs[*]}"
+    fi
+    SRC[native]=u
+  fi
+  if src_set flatpak; then
+    if [[ -z ${pkgs[*]} ]]; then
+      flatpak list
+    else
+      flatpak list | my_grep "${pkgs[*]}"
+    fi
+    SRC[flatpak]=u
+  fi
+  src_none_set || exit_src_not_applicable
 }
 
 function main {
