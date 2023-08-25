@@ -221,6 +221,7 @@ function subcmd_remove {
   local pkgs
   read -ra pkgs <<< "$*"
   if [[ -z ${pkgs[*]} ]]; then
+    src_set_all u
     subcmd_autoremove
     return
   fi
@@ -242,7 +243,7 @@ function subcmd_autoremove {
   src_default native flatpak
   if src_set native; then
     title_echo 'Autoremoving native packages...'
-    $AUR_HELPER -Qdtq | $AUR_HELPER -Rscn -
+    $AUR_HELPER -Yc
     SRC[native]=u
   fi
   if src_set flatpak; then
@@ -309,9 +310,9 @@ function subcmd_list {
   read -ra pkgs <<< "$*"
   if src_set native; then
     if [[ -z ${pkgs[*]} ]]; then
-      yay -Q
+       $AUR_HELPER -Q
     else
-      yay -Q | my_grep "${pkgs[*]}"
+       $AUR_HELPER -Q | my_grep "${pkgs[*]}"
     fi
     SRC[native]=u
   fi
