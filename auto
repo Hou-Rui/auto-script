@@ -166,7 +166,6 @@ function update_flatpak_pkgs {
   else
     flatpak update --assumeyes
   fi
-  $SUDO pkgfile -u
 }
 
 function update_native_pkgs {
@@ -175,6 +174,7 @@ function update_native_pkgs {
   else
     $AUR_HELPER -Syu --devel --noconfirm
   fi
+  $SUDO pkgfile -u
 }
 
 function update_custom_zsh_plugins {
@@ -191,7 +191,8 @@ function update_custom_zsh_plugins {
 }
 
 function update_vim_plugins {
-  nvim -c ' PlugUpgrade | PlugUpdate | UpdateRemotePlugins | qa'
+  nvim -c 'PlugUpgrade | PlugUpdate | UpdateRemotePlugins | qa'
+  nvim -c 'TSUpdate | qa'
   echo 'Done.'
 }
 
