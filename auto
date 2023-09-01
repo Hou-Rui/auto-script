@@ -3,7 +3,7 @@
 set -u
 
 declare -A SRC=([native]=u [flatpak]=u [zsh]=u [vim]=u)
-declare F_REGEX=n F_NO_CONFIRM=n AUR_HELPER SUDO
+declare F_REGEX=n F_NO_CONFIRM=n F_REMOTE=n AUR_HELPER SUDO
 readonly TITLE_SIZE=80
 
 function my_grep {
@@ -34,6 +34,13 @@ function subtitle_echo {
   echo -n ':: '
   tput setaf 15
   echo "$contents"
+  tput sgr0
+}
+
+function bold_echo {
+  local contents="$*"
+  tput bold
+  echo "$*"
   tput sgr0
 }
 
@@ -107,7 +114,30 @@ function exit_msg {
 
 function exit_usage {
   echo 'Usage: auto <command> [options] [packages]'
-  exit 1
+  echo
+  echo 'Available commands:'
+  echo '  install:    install package(s) (default to native)'
+  echo '  remove:     remove package(s) (default to native)'
+  echo '  search:     search package(s) in remote repositories (default to native and flatpak)'
+  echo '  update:     update package(s) (default to native, flatpak, zsh, vim)'
+  echo '  autoremove: remove unused packages (default to native and flatpak)'
+  echo '  clean:      clean cache and unused packages (default to native and flatpak)'
+  echo '  info:       display info for a package (default to native)'
+  echo '  which:      query which package owns an executable (default to native)'
+  echo '  list:       list installed packages (default to native and flatpak)'
+  echo '  help:       display this message'
+  echo
+  echo 'Available options:'
+  echo '  -n, --native:     apply operation on native packages'
+  echo '  -f, --flatpak:    apply operation on flatpak packages'
+  echo '  -v, --vim:        apply operation on vim packages'
+  echo '  -z, --zsh:        apply operation on zsh packages'
+  echo '  -y, --noconfirm:  skip all confirmation'
+  echo '  -r, --regex:      (only for search) use regular expression in searching terms'
+  echo '  -w, --remote:     (only for info and which) display or query remote info'
+  echo '  -e <src>,'
+  echo '  --exclude <src>:  exclude source when performing operation'
+  exit "${1:-1}"
 }
 
 function exit_no_package_names {
@@ -268,38 +298,58 @@ function subcmd_clean {
 function subcmd_which {
   src_none_set || exit_src_not_applicable
   (( $# > 0 )) || exit_usage 1
-  local pkgs="$*"
-  $AUR_HELPER -Qo "$(which "$pkgs")"
+  local pkg pkgs exec remote
+  read -ra pkgs <<< "$*"
+  for pkg in "${pkgs[@]}"; do
+    if [[ $F_REMOTE == n ]]; then
+      exec="$(which "$pkg" 2> /dev/null)" \
+        || exit_msg "$pkg not found."
+      $AUR_HELPER -Qo "$exec"
+    else
+      remote="$(pkgfile -s "$pkg")" \
+        || exit_msg "$pkg not found."
+      echo -n "$pkg can be found in "
+      bold_echo "$remote"
+    fi
+  done
+}
+
+function find_flatpak_ref {
+  local ref="$*" matched
+  readarray -t matched <<< \
+    "$(flatpak list --columns=app | sed '1d' | my_grep "$ref")"
+  if [[ -z ${matched[*]} ]]; then
+    return
+  fi
+  if (( ${#matched[@]} == 1 )); then
+    echo "${matched[*]}"
+    return
+  fi
+  printf '%s\n' "${matched[@]}" \
+    | fzf --header="Multiple packages matched! Please select:"
 }
 
 function subcmd_info {
   src_exclusive
   src_default native
   (( $# > 0 )) || exit_usage 1
-  local pkgs selected matched
+  local pkgs selected origin
   read -ra pkgs <<< "$*"
   if src_set flatpak; then
     subtitle_echo "Querying information on flatpak package ${pkgs[*]}..."
-    declare -a matched=()
-    readarray -t matched <<< \
-      "$(flatpak list --columns=application \
-        | sed '1d' \
-        | my_grep "${pkgs[*]}")"
-    if [[ -z ${matched[*]} ]]; then
-      echo "Flatpak package ${pkgs[*]} not found."
-    elif (( ${#matched[@]} == 1 )); then
-      selected="${matched[*]}"
-      echo "Selected Ref: $selected"
+    selected="$(find_flatpak_ref "${pkgs[*]}")"
+    if [[ $F_REMOTE == n ]]; then
       flatpak info "$selected"
     else
-      selected="$(printf '%s\n' "${matched[@]}" \
-        | fzf --header="Multiple packages matched! Please select:")"
-      echo "Selected Ref: $selected"
-      flatpak info "$selected"
+      origin="$(flatpak info -o "$selected")"
+      flatpak remote-info "$origin" "$selected" --log
     fi
   elif src_set native; then
     subtitle_echo "Querying information on native package ${pkgs[*]}..."
-    $AUR_HELPER -Si "${pkgs[@]}"
+    case "$F_REMOTE" in
+      (n) $AUR_HELPER -Qi "${pkgs[@]}";;
+      (*) $AUR_HELPER -Si "${pkgs[@]}";;
+    esac
   else
     exit_src_not_applicable
   fi
@@ -328,14 +378,18 @@ function subcmd_list {
   src_none_set || exit_src_not_applicable
 }
 
+function subcmd_help {
+  exit_usage 0
+}
+
 function main {
   (( $# >= 1 )) || exit_usage
   find_sudo
   find_aur_helper
   local opts subcmd="$1"
   shift
-  opts=$(getopt -o fnzvrye \
-    -l flatpak,native,zsh,vim,regex,noconfirm,exclude: \
+  opts=$(getopt -o fnzvrywe \
+    -l flatpak,native,zsh,vim,regex,noconfirm,remote,exclude: \
     -- "$@") || exit_usage
   eval set -- "$opts"
   while true; do
@@ -346,6 +400,7 @@ function main {
       (-v | --vim)        SRC[vim]=y;;
       (-r | --regex)      F_REGEX=y;;
       (-y | --noconfirm)  F_NO_CONFIRM=y;;
+      (-w | --remote)     F_REMOTE=y;;
       (-e | --exclude)    shift; SRC["$1"]=n;;
       (--)                shift; break;;
     esac
