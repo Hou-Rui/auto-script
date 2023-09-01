@@ -316,17 +316,14 @@ function subcmd_which {
 
 function find_flatpak_ref {
   local ref="$*" matched
-  readarray -t matched <<< \
-    "$(flatpak list --columns=app | sed '1d' | my_grep "$ref")"
-  if [[ -z ${matched[*]} ]]; then
-    return
-  fi
-  if (( ${#matched[@]} == 1 )); then
-    echo "${matched[*]}"
-    return
-  fi
-  printf '%s\n' "${matched[@]}" \
-    | fzf --header="Multiple packages matched! Please select:"
+  mapfile -t matched \
+    <<< "$(flatpak list --columns=app | sed '1d' | my_grep "$ref")"
+  case ${#matched[@]} in
+    (0) return;;
+    (1) echo "${matched[*]}";;
+    (*) printf '%s\n' "${matched[@]}" \
+      | fzf --header="Multiple packages matched! Please select:";;
+  esac
 }
 
 function subcmd_info {
@@ -338,12 +335,11 @@ function subcmd_info {
   if src_set flatpak; then
     subtitle_echo "Querying information on flatpak package ${pkgs[*]}..."
     selected="$(find_flatpak_ref "${pkgs[*]}")"
-    if [[ $F_REMOTE == n ]]; then
-      flatpak info "$selected"
-    else
-      origin="$(flatpak info -o "$selected")"
-      flatpak remote-info "$origin" "$selected" --log
-    fi
+    case "$F_REMOTE" in
+      (n) flatpak info "$selected";;
+      (*) origin="$(flatpak info -o "$selected")"
+          flatpak remote-info "$origin" "$selected" --log;;
+    esac
   elif src_set native; then
     subtitle_echo "Querying information on native package ${pkgs[*]}..."
     case "$F_REMOTE" in
@@ -360,19 +356,17 @@ function subcmd_list {
   local pkgs
   read -ra pkgs <<< "$*"
   if src_set native; then
-    if [[ -z ${pkgs[*]} ]]; then
-       $AUR_HELPER -Q
-    else
-       $AUR_HELPER -Q | my_grep "${pkgs[*]}"
-    fi
+    case ${#pkgs[@]} in
+      (0) $AUR_HELPER -Q;;
+      (*) $AUR_HELPER -Q | my_grep "${pkgs[*]}";;
+    esac
     SRC[native]=u
   fi
   if src_set flatpak; then
-    if [[ -z ${pkgs[*]} ]]; then
-      flatpak list
-    else
-      flatpak list | my_grep "${pkgs[*]}"
-    fi
+    case ${#pkgs[@]} in
+      (0) flatpak list;;
+      (*) flatpak list | my_grep "${pkgs[*]}";;
+    esac
     SRC[flatpak]=u
   fi
   src_none_set || exit_src_not_applicable
