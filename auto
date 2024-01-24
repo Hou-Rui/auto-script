@@ -155,14 +155,14 @@ function subcmd_install {
   read -ra pkgs <<< "$*"
   [[ -z ${pkgs[*]} ]] && exit_no_package_names
   if src_set native; then
-    title_echo "Installing native package ${pkgs[*]}..."
+    title_echo "Installing native package(s) ${pkgs[*]}..."
     if [[ $F_NO_CONFIRM == n ]]; then
       $AUR_HELPER -S "${pkgs[@]}"
     else
       $AUR_HELPER -Syy "${pkgs[@]}"
     fi
   elif src_set flatpak; then
-    title_echo "Installing Flatpak package ${pkgs[*]}..."
+    title_echo "Installing Flatpak package(s) ${pkgs[*]}..."
     if [[ $F_NO_CONFIRM == n ]]; then
       flatpak install "${pkgs[@]}"
     else
@@ -178,12 +178,12 @@ function subcmd_search {
   local pkgs
   read -ra pkgs <<< "$*"
   if src_set native; then
-    title_echo "Searching native package ${pkgs[*]}..."
+    title_echo "Searching native package(s) ${pkgs[*]}..."
     $AUR_HELPER -Ss "${pkgs[@]}"
     SRC[native]=u
   fi
   if src_set flatpak; then
-    title_echo "Searching Flatpak package ${pkgs[*]}..."
+    title_echo "Searching Flatpak package(s) ${pkgs[*]}..."
     flatpak search "${pkgs[@]}"
     SRC[flatpak]=u
   fi
@@ -199,10 +199,12 @@ function update_flatpak_pkgs {
 }
 
 function update_native_pkgs {
-  if [[ $F_NO_CONFIRM == n ]]; then
-    $AUR_HELPER -Syu --devel
+  local flag_noconfirm=''
+  [[ $F_NO_CONFIRM == y ]] && flag_noconfirm='--noconfirm'
+  if [[ -z $* ]]; then
+    $AUR_HELPER -Syu --devel $flag_noconfirm
   else
-    $AUR_HELPER -Syu --devel --noconfirm
+    $AUR_HELPER -S --needed "$@"
   fi
   $SUDO pkgfile -u
 }
@@ -221,20 +223,26 @@ function update_custom_zsh_plugins {
 }
 
 function update_vim_plugins {
-  nvim -c 'PlugUpgrade | PlugUpdate | UpdateRemotePlugins | qa'
-  nvim -c 'TSUpdate | qa'
+  nvim "+Lazy! sync" +qa --headless
   echo 'Done.'
 }
 
 function subcmd_update {
-  src_default_all
+  local pkgs
+  read -ra pkgs <<< "$*"
+  if [[ -z ${pkgs[*]} ]]; then
+    src_default_all
+  else
+    src_exclusive
+    src_default native
+  fi
   if src_set native; then
-    title_echo 'Updating native packages...'
-    update_native_pkgs
+    title_echo "Updating native package(s) ${pkgs[*]}..."
+    update_native_pkgs "${pkgs[@]}"
   fi
   if src_set flatpak; then
-    title_echo 'Updating Flatpak packages...'
-    update_flatpak_pkgs
+    title_echo "Updating Flatpak package(s) ${pkgs[*]}..."
+    update_flatpak_pkgs "${pkgs[@]}"
   fi
   if src_set zsh; then
     title_echo 'Updating ZSH plugins...'
@@ -257,13 +265,13 @@ function subcmd_remove {
     return
   fi
   if src_set native; then
-    title_echo "Removing native package ${pkgs[*]}..."
+    title_echo "Removing native package(s) ${pkgs[*]}..."
     case $F_REGEX in
       (n) $AUR_HELPER -Rscn "${pkgs[@]}";;
       (*) $AUR_HELPER -Qnq | my_grep "${pkgs[*]}" | $AUR_HELPER -Rscn -;;
     esac
   elif src_set flatpak; then
-    title_echo "Removing Flatpak package ${pkgs[*]}..."
+    title_echo "Removing Flatpak package(s) ${pkgs[*]}..."
     flatpak uninstall --delete-data "${pkgs[@]}"
   else
     exit_src_not_applicable
@@ -333,7 +341,7 @@ function subcmd_info {
   local pkgs selected origin
   read -ra pkgs <<< "$*"
   if src_set flatpak; then
-    subtitle_echo "Querying information on flatpak package ${pkgs[*]}..."
+    subtitle_echo "Querying information on flatpak package(s) ${pkgs[*]}..."
     selected="$(find_flatpak_ref "${pkgs[*]}")"
     case "$F_REMOTE" in
       (n) flatpak info "$selected";;
@@ -341,7 +349,7 @@ function subcmd_info {
           flatpak remote-info "$origin" "$selected" --log;;
     esac
   elif src_set native; then
-    subtitle_echo "Querying information on native package ${pkgs[*]}..."
+    subtitle_echo "Querying information on native package(s) ${pkgs[*]}..."
     case "$F_REMOTE" in
       (n) $AUR_HELPER -Qi "${pkgs[@]}";;
       (*) $AUR_HELPER -Si "${pkgs[@]}";;
