@@ -1,0 +1,39 @@
+{
+    "source_default": {
+        "single": "yay",
+        "multiple": [
+            "yay",
+            "flatpak"
+        ]
+    },
+    "source": {
+        "yay": {
+            "search": "yay -Ss {}",
+            "list": {
+                "package": "yay -Qq | grep {}",
+                "all": "yay -Qq"
+            },
+            "update": {
+                "package": "yay -S {}",
+                "all": "yay -Syu"
+            },
+            "install": "yay -S {}",
+            "remove": "yay -Rscn {}",
+            "clean": "yay -Qdtq | yay -Rscn -; yay -Sccd"
+        },
+        "flatpak": {
+            "search": "flatpak search {}",
+            "list": {
+                "package": "flatpak list | grep {}",
+                "all": "flatpak list"
+            },
+            "update": {
+                "package": "flatpak update {}",
+                "all": "flatpak update"
+            },
+            "install": "flatpak install {}",
+            "remove": "flatpak remove {}",
+            "clean": "flatpak remove --unused"
+        }
+    }
+}
