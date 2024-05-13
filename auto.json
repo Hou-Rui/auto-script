@@ -19,7 +19,11 @@
             },
             "install": "yay -S {}",
             "remove": "yay -Qq | grep -E '^{}$' | yay -Rscn -",
-            "clean": "yay -Qdtq | yay -Rscn -; yay -Sccd"
+            "clean": "yay -Qdtq | yay -Rscn -; yay -Sccd",
+            "info": {
+                "remote": "yay -Sii {}",
+                "local": "yay -Qii {}"
+            }
         },
         "flatpak": {
             "search": "flatpak search {}",
@@ -33,7 +37,11 @@
             },
             "install": "flatpak install {}",
             "remove": "flatpak remove {}",
-            "clean": "flatpak remove --unused"
+            "clean": "flatpak remove --unused",
+            "info": {
+                "local": "flatpak info {}",
+                "remote": "pkg=\"{}\"; origin=\"$(flatpak info -o $pkg)\"; flatpak remote-info \"$origin\" \"$pkg\" --log"
+            }
         }
     }
 }
