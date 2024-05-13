@@ -22,7 +22,9 @@ def support_package(required: bool | None = True):
     return click.argument('package', nargs=-1, required=required)
 
 
-def get_source_configs(source_names: Iterable[str]):
+def get_source_configs(source_names: str | Iterable[str]):
+    if isinstance(source_names, str):
+        source_names = (source_names,)
     for name in source_names:
         if name not in config['source']:
             click.echo(f'Source not found: {name}')
@@ -36,7 +38,7 @@ def subcommand(source_multiple: bool = True, package_required: bool | None = Tru
         @cli.command(name)
         @support_source(multiple=source_multiple)
         @support_package(required=package_required)
-        def inner(source: tuple[str], package: tuple[str]):
+        def inner(source: str | tuple[str], package: tuple[str]):
             config_list = (c[name] for c in get_source_configs(source))
             package_str = ' '.join(package)
             for config in config_list:

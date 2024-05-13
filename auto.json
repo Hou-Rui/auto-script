@@ -10,7 +10,7 @@
         "yay": {
             "search": "yay -Ss {}",
             "list": {
-                "package": "yay -Qq | grep {}",
+                "package": "yay -Qq | grep -E '{}'",
                 "all": "yay -Qq"
             },
             "update": {
@@ -18,13 +18,13 @@
                 "all": "yay -Syu"
             },
             "install": "yay -S {}",
-            "remove": "yay -Rscn {}",
+            "remove": "yay -Qq | grep -E '^{}$' | yay -Rscn -",
             "clean": "yay -Qdtq | yay -Rscn -; yay -Sccd"
         },
         "flatpak": {
             "search": "flatpak search {}",
             "list": {
-                "package": "flatpak list | grep {}",
+                "package": "flatpak list | grep -E '{}'",
                 "all": "flatpak list"
             },
             "update": {
