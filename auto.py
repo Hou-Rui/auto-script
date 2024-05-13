@@ -22,14 +22,12 @@ def support_package(required: bool | None = True):
     return click.argument('package', nargs=-1, required=required)
 
 
-def get_source_configs(source_names: Iterable[str]) -> list[dict]:
-    config_list = []
+def get_source_configs(source_names: Iterable[str]):
     for name in source_names:
         if name not in config['source']:
             click.echo(f'Source not found: {name}')
             exit(1)
-        config_list.append(config['source'][name])
-    return config_list
+        yield config['source'][name]
 
 
 def subcommand(source_multiple: bool = True, package_required: bool | None = True):
@@ -39,7 +37,7 @@ def subcommand(source_multiple: bool = True, package_required: bool | None = Tru
         @support_source(multiple=source_multiple)
         @support_package(required=package_required)
         def inner(source: tuple[str], package: tuple[str]):
-            config_list = [c[name] for c in get_source_configs(source)]
+            config_list = (c[name] for c in get_source_configs(source))
             package_str = ' '.join(package)
             for config in config_list:
                 if package_required is None:
