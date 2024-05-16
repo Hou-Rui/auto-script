@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import json
+import yaml
 import os
 from enum import Enum, auto
 from typing import Iterable
@@ -8,14 +8,14 @@ from typing import Iterable
 import click
 
 
-class Req(Enum):
+class PkgReq(Enum):
     Required = auto()
     Optional = auto()
     Disallowed = auto()
 
 
-with open('auto.json') as config_file:
-    config = json.load(config_file)
+with open('auto.yaml') as config_file:
+    config = yaml.safe_load(config_file)
 
 
 def support_source(multiple: bool):
@@ -25,17 +25,18 @@ def support_source(multiple: bool):
                         multiple=multiple, default=default,
                         help='Source of action.')
 
+pass_through = lambda x: x
 
-def support_package(required: Req):
-    if required is Req.Disallowed:
-        return lambda x: x  # passthrough decorator
-    req = required is Req.Required
+def support_package(required: PkgReq):
+    if required is PkgReq.Disallowed:
+        return pass_through
+    req = required is PkgReq.Required
     return click.argument('package', nargs=-1, required=req)
 
 
 def support_remote(supported: bool = False):
     if not supported:
-        return lambda x: x
+        return pass_through
     return click.option('-w', '--remote',
                         is_flag=True, show_default=True, default=False,
                         help='Show information from remote locations.')
@@ -58,13 +59,13 @@ def get_source_configs(source_names: Iterable[str], action: str):
 def subcommand(action: str,
                help: str,
                source_multiple: bool = True,
-               package_required: Req = Req.Required,
+               package_required: PkgReq = PkgReq.Required,
                remote_supported: bool = False):
     @cli.command(action, help=help, short_help=help)
     @support_source(multiple=source_multiple)
     @support_package(required=package_required)
     @support_remote(remote_supported)
-    def inner(source: str | tuple[str],
+    def _(source: str | tuple[str],
               package: tuple[str] | None = None,
               remote: bool | None = None):
         # if single source, put it in a tuple
@@ -86,10 +87,10 @@ def subcommand(action: str,
                 assert isinstance(cmd, dict)
                 cmd = cmd['remote'] if remote else cmd['local']
             # required packages support
-            if package_required is Req.Required:
+            if package_required is PkgReq.Required:
                 assert isinstance(cmd, str)
                 cmd = cmd.format(package_str)
-            elif package_required is Req.Optional:
+            elif package_required is PkgReq.Optional:
                 assert isinstance(cmd, dict)
                 if package:
                     cmd = cmd['package'].format(package_str)
@@ -97,7 +98,6 @@ def subcommand(action: str,
                     cmd = cmd['all']
             assert isinstance(cmd, str)
             os.system(cmd)
-    return inner
 
 
 @click.group()
@@ -108,14 +108,14 @@ def cli():
 subcommand('install', 'Install packages.',
            source_multiple=False)
 subcommand('list', 'List installed packages.',
-           package_required=Req.Optional)
+           package_required=PkgReq.Optional)
 subcommand('search', 'Search online for packages.')
 subcommand('update', 'Update packages.',
-           package_required=Req.Optional)
+           package_required=PkgReq.Optional)
 subcommand('remove', 'Remove packages.',
            source_multiple=False)
 subcommand('clean', 'Clean unused packages and cache.',
-           package_required=Req.Disallowed)
+           package_required=PkgReq.Disallowed)
 subcommand('info', 'Display information on packages.',
            source_multiple=False, remote_supported=True)
 
