@@ -18,23 +18,25 @@ with open('auto.yaml') as config_file:
     config = yaml.safe_load(config_file)
 
 
-def support_source(multiple: bool):
+def option_source(multiple: bool):
     def_conf = config['source_default']
     default = def_conf['multiple'] if multiple else def_conf['single']
     return click.option('-s', '--source',
                         multiple=multiple, default=default,
                         help='Source of action.')
 
-pass_through = lambda x: x
 
-def support_package(required: PkgReq):
+def pass_through(x): return x
+
+
+def arg_package(required: PkgReq):
     if required is PkgReq.Disallowed:
         return pass_through
     req = required is PkgReq.Required
     return click.argument('package', nargs=-1, required=req)
 
 
-def support_remote(supported: bool = False):
+def option_remote(supported: bool):
     if not supported:
         return pass_through
     return click.option('-w', '--remote',
@@ -62,12 +64,12 @@ def subcommand(action: str,
                package_required: PkgReq = PkgReq.Required,
                remote_supported: bool = False):
     @cli.command(action, help=help, short_help=help)
-    @support_source(multiple=source_multiple)
-    @support_package(required=package_required)
-    @support_remote(remote_supported)
+    @option_source(multiple=source_multiple)
+    @option_remote(remote_supported)
+    @arg_package(required=package_required)
     def _(source: str | tuple[str],
-              package: tuple[str] | None = None,
-              remote: bool | None = None):
+          remote: bool | None = None,
+          package: tuple[str] | None = None):
         # if single source, put it in a tuple
         if isinstance(source, str):
             source = (source,)
