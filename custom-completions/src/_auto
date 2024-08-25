@@ -24,9 +24,9 @@ _auto_remote_packages() {
   local -a pkgs
   local prefix="$PREFIX"
   if [[ -z "$prefix" ]]; then
-    pkgs=($(yay -Slq))
+    pkgs=($(pacman -Slq))
   else
-    pkgs=($(yay -Slq | grep $prefix))
+    pkgs=($(pacman -Slq | grep $prefix))
   fi
   _describe "packges" pkgs
 }
