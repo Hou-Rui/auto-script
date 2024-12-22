@@ -318,13 +318,17 @@ function cmd:which {
   read -ra pkgs <<<"$*"
   for pkg in "${pkgs[@]}"; do
     if [[ $F_REMOTE == n ]]; then
-      exec="$(which "$pkg" 2>/dev/null)" ||
+      if exec="$(which "$pkg" 2>/dev/null)"; then
+        $AUR_HELPER -Qo "$exec"
+      elif [[ -e $pkg ]]; then
+        $AUR_HELPER -Qo "$pkg"
+      else
         die:msg "$pkg not found."
-      $AUR_HELPER -Qo "$exec"
+      fi
     else
       remote="$(pkgfile -s "$pkg")" ||
-        die:msg "$pkg not found."
-      echo -n "$pkg can be found in "
+        die:msg "$pkg not found in remote repositories."
+      echo "$pkg can be found in:"
       util:bold "$remote"
     fi
   done
