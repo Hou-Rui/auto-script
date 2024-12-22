@@ -12,15 +12,15 @@ function util:grep {
 
 function util:title {
   local contents="$*"
-  local size=${#contents} size1 size2
+  local size=${#contents} i size1 size2
   ((size1 = (TITLE_SIZE - size) / 2))
   ((size2 = (TITLE_SIZE - size) % 2 == 0 ? size1 : size1 + 1))
   tput bold
-  for _ in $(seq $size1); do
+  for ((i = 0; i < size1; i++)); do
     echo -n '⎼'
   done
   echo -n " $contents "
-  for _ in $(seq $size2); do
+  for ((i = 0; i < size2; i++)); do
     echo -n '⎼'
   done
   echo
