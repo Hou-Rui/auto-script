@@ -216,18 +216,23 @@ function cmd:update:native_pkgs {
   $SUDO pkgfile -u
 }
 
-function cmd:update:custom_zsh_plugins {
-  local dir plugin ZSH="$HOME/.oh-my-zsh"
+function cmd:update:zsh_plugins {
+  local dir plugin
+  local zplug_path="$HOME/.zplug" omz_path="$HOME/.oh-my-zsh"
   util:subtitle "Updating Oh-My-Zsh..."
-  zsh -c "$ZSH/tools/upgrade.sh"
-  for dir in "$ZSH/custom/plugins"/* "$ZSH/custom/themes"/*; do
-    [[ -e $dir/.git ]] || continue
-    plugin="$(basename "$dir")"
-    util:subtitle "Updating plugin $plugin..."
-    ( cd "$dir" || return
-      git pull ) &
-  done
-  wait
+  if [[ -d $zplug_path ]]; then
+    zsh -ic "zplug update"
+  elif [[ -d $omz_path ]]; then
+    zsh -c "$OMZ/tools/upgrade.sh"
+    for dir in "$OMZ/custom/plugins"/* "$OMZ/custom/themes"/*; do
+      [[ -e $dir/.git ]] || continue
+      plugin="$(basename "$dir")"
+      util:subtitle "Updating plugin $plugin..."
+      ( cd "$dir" || return
+        git pull ) &
+    done
+    wait
+  fi
 }
 
 function cmd:update:vim_plugins {
@@ -254,7 +259,7 @@ function cmd:update {
   fi
   if src:set zsh; then
     util:title 'Updating ZSH plugins...'
-    cmd:update:custom_zsh_plugins
+    cmd:update:zsh_plugins
   fi
   if src:set vim; then
     util:title 'Updating NeoVim plugins...'
