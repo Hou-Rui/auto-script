@@ -223,8 +223,9 @@ function cmd:update:zsh_plugins {
   if [[ -d $zplug_path ]]; then
     zsh -ic "zplug update"
   elif [[ -d $omz_path ]]; then
-    zsh -c "$OMZ/tools/upgrade.sh"
-    for dir in "$OMZ/custom/plugins"/* "$OMZ/custom/themes"/*; do
+    zsh -c "$omz_path/tools/upgrade.sh"
+    local omz_custom="$omz_path/custom"
+    for dir in "$omz_custom/plugins"/* "$omz_custom/themes"/*; do
       [[ -e $dir/.git ]] || continue
       plugin="$(basename "$dir")"
       util:subtitle "Updating plugin $plugin..."
