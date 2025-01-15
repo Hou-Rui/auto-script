@@ -229,8 +229,9 @@ function cmd:update:zsh_plugins {
       [[ -e $dir/.git ]] || continue
       plugin="$(basename "$dir")"
       util:subtitle "Updating plugin $plugin..."
-      ( cd "$dir" || return
-        git pull ) &
+      pushd -q "$dir" || return
+      git pull &
+      popd -q
     done
     wait
   fi
@@ -324,6 +325,7 @@ function cmd:which {
   read -ra pkgs <<<"$*"
   for pkg in "${pkgs[@]}"; do
     if [[ $F_REMOTE == n ]]; then
+      util:title "Querying which package provides $pkg..."
       if exec="$(which "$pkg" 2>/dev/null)"; then
         $AUR_HELPER -Qo "$exec"
       elif [[ -e $pkg ]]; then
@@ -332,6 +334,7 @@ function cmd:which {
         die:msg "$pkg not found."
       fi
     else
+      util:title "Querying remote packages to provide $pkg..."
       remote="$(pkgfile -s "$pkg")" ||
         die:msg "$pkg not found in remote repositories."
       echo "$pkg can be found in:"
@@ -359,7 +362,7 @@ function cmd:info {
   local pkgs selected origin
   read -ra pkgs <<<"$*"
   if src:set flatpak; then
-    util:subtitle "Querying information on flatpak package(s) ${pkgs[*]}..."
+    util:title "Querying information on flatpak package(s) ${pkgs[*]}..."
     selected="$(util:find_flatpak_ref "${pkgs[*]}")"
     case "$F_REMOTE" in
     (n) flatpak info "$selected" ;;
@@ -369,7 +372,7 @@ function cmd:info {
       ;;
     esac
   elif src:set native; then
-    util:subtitle "Querying information on native package(s) ${pkgs[*]}..."
+    util:title "Querying information on native package(s) ${pkgs[*]}..."
     case "$F_REMOTE" in
     (n) $AUR_HELPER -Qi "${pkgs[@]}" ;;
     (*) $AUR_HELPER -Si "${pkgs[@]}" ;;
