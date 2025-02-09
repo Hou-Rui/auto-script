@@ -229,9 +229,7 @@ function cmd:update:zsh_plugins {
       [[ -e $dir/.git ]] || continue
       plugin="$(basename "$dir")"
       util:subtitle "Updating plugin $plugin..."
-      pushd -q "$dir" || return
-      git pull &
-      popd -q
+      ( cd "$dir" && git pull ) &
     done
     wait
   fi
