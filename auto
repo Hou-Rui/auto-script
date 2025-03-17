@@ -372,8 +372,8 @@ function cmd:info {
   elif src:set native; then
     util:title "Querying information on native package(s) ${pkgs[*]}..."
     case "$F_REMOTE" in
-    (n) $AUR_HELPER -Qi "${pkgs[@]}" ;;
-    (*) $AUR_HELPER -Si "${pkgs[@]}" ;;
+    (n) $AUR_HELPER -Qii "${pkgs[@]}" ;;
+    (*) $AUR_HELPER -Sii "${pkgs[@]}" ;;
     esac
   else
     die:src_not_applicable
