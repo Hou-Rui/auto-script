@@ -7,7 +7,10 @@ declare F_REGEX=n F_NO_CONFIRM=n F_REMOTE=n AUR_HELPER SUDO
 readonly TITLE_SIZE=80
 
 function util:grep {
-  grep -Ei -- "$*"
+  case "$F_REGEX" in
+    (y) grep -Pi -- "$*";;
+    (*) grep -Fi -- "$*";;
+  esac
 }
 
 function util:title {
@@ -163,18 +166,16 @@ function cmd:install {
   [[ -z ${pkgs[*]} ]] && die:no_package_names
   if src:set native; then
     util:title "Installing native package(s) ${pkgs[*]}..."
-    if [[ $F_NO_CONFIRM == n ]]; then
-      $AUR_HELPER -S "${pkgs[@]}"
-    else
-      $AUR_HELPER -Syy "${pkgs[@]}"
-    fi
+    case "$F_NO_CONFIRM" in
+      (y) $AUR_HELPER -Syy "${pkgs[@]}";;
+      (*) $AUR_HELPER -S "${pkgs[@]}";;
+    esac
   elif src:set flatpak; then
     util:title "Installing Flatpak package(s) ${pkgs[*]}..."
-    if [[ $F_NO_CONFIRM == n ]]; then
-      flatpak install "${pkgs[@]}"
-    else
-      flatpak install --assumeyes "${pkgs[@]}"
-    fi
+    case "$F_NO_CONFIRM" in
+      (y) flatpak install --assumeyes "${pkgs[@]}";;
+      (*) flatpak install "${pkgs[@]}";;
+    esac
   else
     die:src_not_applicable
   fi
@@ -198,11 +199,9 @@ function cmd:search {
 }
 
 function cmd:update:flatpak_pkgs {
-  if [[ $F_NO_CONFIRM == n ]]; then
-    flatpak update
-  else
-    flatpak update --assumeyes
-  fi
+  local flag_noconfirm=''
+  [[ $F_NO_CONFIRM == y ]] && flag_noconfirm='--assumeyes'
+  flatpak update $flag_noconfirm
 }
 
 function cmd:update:native_pkgs {
@@ -211,7 +210,7 @@ function cmd:update:native_pkgs {
   if [[ -z $* ]]; then
     $AUR_HELPER -Syu --devel $flag_noconfirm
   else
-    $AUR_HELPER -S --needed "$@"
+    $AUR_HELPER -S --needed $flag_noconfirm "$@"
   fi
   $SUDO pkgfile -u
 }
@@ -279,10 +278,7 @@ function cmd:remove {
   fi
   if src:set native; then
     util:title "Removing native package(s) ${pkgs[*]}..."
-    case $F_REGEX in
-    (n) $AUR_HELPER -Rscn "${pkgs[@]}" ;;
-    (*) $AUR_HELPER -Qnq | util:grep "${pkgs[*]}" | $AUR_HELPER -Rscn - ;;
-    esac
+    $AUR_HELPER -Qnq | util:grep "${pkgs[*]}" | $AUR_HELPER -Rscn -
   elif src:set flatpak; then
     util:title "Removing Flatpak package(s) ${pkgs[*]}..."
     flatpak uninstall --delete-data "${pkgs[@]}"
@@ -346,10 +342,10 @@ function util:find_flatpak_ref {
   mapfile -t matched \
     <<<"$(flatpak list --columns=app | sed '1d' | util:grep "$ref")"
   case ${#matched[@]} in
-  (0) return ;;
-  (1) echo "${matched[*]}" ;;
-  (*) printf '%s\n' "${matched[@]}" |
-    fzf --header="Multiple packages matched! Please select:" ;;
+    (0) return;;
+    (1) echo "${matched[*]}";;
+    (*) printf '%s\n' "${matched[@]}" |
+      fzf --header="Multiple packages matched! Please select:";;
   esac
 }
 
@@ -363,17 +359,15 @@ function cmd:info {
     util:title "Querying information on flatpak package(s) ${pkgs[*]}..."
     selected="$(util:find_flatpak_ref "${pkgs[*]}")"
     case "$F_REMOTE" in
-    (n) flatpak info "$selected" ;;
-    (*)
-      origin="$(flatpak info -o "$selected")"
-      flatpak remote-info "$origin" "$selected" --log
-      ;;
+      (n) flatpak info "$selected";;
+      (*) origin="$(flatpak info -o "$selected")"
+          flatpak remote-info "$origin" "$selected" --log;;
     esac
   elif src:set native; then
     util:title "Querying information on native package(s) ${pkgs[*]}..."
     case "$F_REMOTE" in
-    (n) $AUR_HELPER -Qii "${pkgs[@]}" ;;
-    (*) $AUR_HELPER -Sii "${pkgs[@]}" ;;
+      (n) $AUR_HELPER -Qii "${pkgs[@]}";;
+      (*) $AUR_HELPER -Sii "${pkgs[@]}";;
     esac
   else
     die:src_not_applicable
@@ -386,15 +380,15 @@ function cmd:list {
   read -ra pkgs <<<"$*"
   if src:set native; then
     case ${#pkgs[@]} in
-    (0) $AUR_HELPER -Q ;;
-    (*) $AUR_HELPER -Q | util:grep "${pkgs[*]}" ;;
+      (0) $AUR_HELPER -Q;;
+      (*) $AUR_HELPER -Q | util:grep "${pkgs[*]}";;
     esac
     SRC[native]=u
   fi
   if src:set flatpak; then
     case ${#pkgs[@]} in
-    (0) flatpak list ;;
-    (*) flatpak list | util:grep "${pkgs[*]}" ;;
+      (0) flatpak list;;
+      (*) flatpak list | util:grep "${pkgs[*]}" | column -ts $'\t';;
     esac
     SRC[flatpak]=u
   fi
