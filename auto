@@ -93,8 +93,11 @@ sub subcmd_clean() {
 
 sub subcmd_search(@pkgs) {
     src_req defaults => ["native", "flatpak"], pkgs => 1;
-    src_handle native => sub { system $AUR_HELPER, "-Ss", @pkgs},
-    flatpak => sub {
+    src_handle native => sub {
+        title "Searching native package(s) %s...", pkg_str;
+        system $AUR_HELPER, "-Ss", @pkgs;
+    }, flatpak => sub {
+        title "Searching Flatpak package(s) %s...", pkg_str;
         open my $cmd, "-|", "flatpak", "search", @pkgs;
         chomp(my @lines = <$cmd>);
         for (reverse @lines) {
@@ -122,8 +125,13 @@ sub subcmd_install(@pkgs) {
 
 sub subcmd_remove(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
-    src_handle native  => sub { system $AUR_HELPER, "-Rscn", @pkgs },
-    flatpak => sub { system "flatpak", "uninstall", "--delete-data", @pkgs }
+    src_handle native => sub {
+        title "Removing native package(s) %s...", pkgs_str;
+        system $AUR_HELPER, "-Rscn", @pkgs;
+    }, flatpak => sub {
+        title "Removing Flatpak package(s) %s...", pkgs_str;
+        system "flatpak", "uninstall", "--delete-data", @pkgs;
+    }
 }
 
 sub subcmd_which(@pkgs) {
