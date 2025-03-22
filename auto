@@ -1,21 +1,24 @@
 #!/usr/bin/env perl
 use v5.36;
 use threads;
-use Env 'HOME';
+use Env 'HOME', 'PATH';
 use POSIX 'floor', 'ceil';
 use Getopt::Long;
 use Term::ANSIColor;
-use File::Which;
 use File::Basename;
 use List::Util 'first';
 
 my (%SRC, %OPT);
-my $AUR_HELPER = first {defined which $_} ('yay', 'paru', 'pacman')
-    or die "error: no AUR helper or pacman found.\n";
-my $SUDO = first {defined which $_} ('sudo', 'doas', 'pkexec')
-    or die "error: no sudo utility found.\n";
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
 my $SUBCMD = shift;
+
+sub which($bin) { first { -e "$_/$bin" } (split ":", $PATH) }
+sub first_of($desc, @cmds) {
+    first {defined which $_} @cmds or die "error: no $desc found\n";
+}
+
+my $AUR_HELPER = first_of "AUR helpers", 'yay', 'paru', 'pacman';
+my $SUDO = first_of "sudo utilities", 'sudo', 'doas', 'pkexec';
 
 sub title($fmt, @args) {
     my $str = sprintf $fmt, @args;
@@ -57,8 +60,8 @@ sub src_handle(%handlers) {
     src_count == 0 or die_not_applicable;
 }
 
-sub flag_yes_native    { $OPT{yes} ? ("--noconfirm") : () }
-sub flag_yes_flatpak   { $OPT{yes} ? ("--assumeyes") : () }
+sub flag_yes_native  { $OPT{yes} ? ("--noconfirm") : () }
+sub flag_yes_flatpak { $OPT{yes} ? ("--assumeyes") : () }
 
 sub subcmd_info(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
@@ -91,24 +94,33 @@ sub subcmd_clean() {
     }
 }
 
+sub parse_flatpak(%req) {
+    my ($reversed, $cmd, $pat) = ($req{reversed}, $req{cmd}, $req{pat});
+    my $col_remote = defined $pat ? "origin" : "remotes";
+    open my $out, "-|", @{$cmd},
+        "--columns=name,description,application,version,branch,$col_remote";
+    chomp(my @lines = <$out>);
+    @lines = reverse @lines if $reversed;
+    for (@lines) {
+        my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
+        next unless not $pat or grep /$pat/, ($name, $appid, $desc);
+        $remote = colored $remote, "bold blue";
+        $appid  = colored $appid, "bold";
+        $ver    = colored $ver, "cyan";
+        say "$remote/$appid $ver ($branch)";
+        say "    $name: $desc";
+    }
+    close $out;
+}
+
 sub subcmd_search(@pkgs) {
     src_req defaults => ["native", "flatpak"], pkgs => 1;
     src_handle native => sub {
-        title "Searching native package(s) %s...", pkg_str;
+        title "Searching native package(s) %s...", pkgs_str;
         system $AUR_HELPER, "-Ss", @pkgs;
     }, flatpak => sub {
-        title "Searching Flatpak package(s) %s...", pkg_str;
-        open my $cmd, "-|", "flatpak", "search", @pkgs;
-        chomp(my @lines = <$cmd>);
-        for (reverse @lines) {
-            my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
-            $remote = colored $remote, "bold blue";
-            $appid  = colored $appid, "bold";
-            $ver    = colored $ver, "cyan";
-            say "$remote/$appid $ver ($branch)";
-            say "    $name: $desc";
-        }
-        close $cmd;
+        title "Searching Flatpak package(s) %s...", pkgs_str;
+        parse_flatpak reversed => 1, cmd => ["flatpak", "search", @pkgs];
     }
 }
 
@@ -131,6 +143,18 @@ sub subcmd_remove(@pkgs) {
     }, flatpak => sub {
         title "Removing Flatpak package(s) %s...", pkgs_str;
         system "flatpak", "uninstall", "--delete-data", @pkgs;
+    }
+}
+
+sub subcmd_list(@pkgs) {
+    src_req defaults => ["native", "flatpak"];
+    src_handle native => sub {
+        title "Listing native package(s) %s...", pkgs_str;
+        system $AUR_HELPER, "-Qs", @pkgs
+    }, flatpak => sub {
+        title "Listing Flatpak package(s) %s...", pkgs_str;
+        my $pat = join " ", @pkgs;
+        parse_flatpak cmd => ["flatpak", "list"], pat => $pat;
     }
 }
 
@@ -170,7 +194,7 @@ sub subcmd_update(@pkgs) {
         }
     }, vim => sub {
         title "Updating Vim plugins...";
-        system "nvim", "+Lazy! sync", "+qa", "--headless";
+        system "nvim +Lazy! sync +qa --headless";
         say "Done."
     }
 }
