@@ -3,7 +3,7 @@ use v5.36;
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Which;
-use List::Util 'first', 'none';
+use List::Util 'first';
 
 my (%SRC, %OPT);
 my $AUR_HELPER = first {defined which $_} ('yay', 'paru', 'pacman')
@@ -12,6 +12,8 @@ my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
 my $SUBCMD = shift;
 
 sub src_str            { join ", ", grep {$SRC{$_}} @ALL_SRC }
+sub src_count          { scalar grep {defined $_} values %SRC }
+
 sub die_msg            { die "error in $SUBCMD: @_.\n" }
 sub die_no_subcmd      { die "error: missing subcommand.\n" }
 sub die_unknown_subcmd { die "error: unknown subcommand '$SUBCMD'.\n" }
@@ -20,10 +22,9 @@ sub die_not_exclusive  { die_msg "multiple sources", src_str, "specified" }
 sub die_no_pkgs        { die_msg "no packages specified" }
 
 sub src_req(%req) {
-    my $src_count = grep {defined $_} values %SRC;
     my $defaults = $req{defaults};
-    map {$SRC{$_} = 1} @{$defaults} if defined $defaults and $src_count == 0;
-    $src_count == 1 or die_not_exclusive if $req{exclusive};
+    map {$SRC{$_} = 1} @{$defaults} if defined $defaults and src_count == 0;
+    src_count == 1 or die_not_exclusive if $req{exclusive};
     @ARGV or die_no_pkgs if $req{pkgs};
 }
 
@@ -34,20 +35,20 @@ sub src_handle(%handlers) {
         $handlers{$src}->(@ARGV);
         delete $SRC{$src};
     }
-    none {defined $_} values %SRC or die_not_applicable;
+    src_count == 0 or die_not_applicable;
 }
 
-sub subcmd_info {
+sub subcmd_info(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
         my $query = $OPT{remote} ? "-Sii" : "-Qii";
-        system $AUR_HELPER, $query, @_;
+        system $AUR_HELPER, $query, @pkgs;
     }, flatpak => sub {
-        system "flatpak", "info", @_;
+        system "flatpak", "info", @pkgs;
     }
 }
 
-sub subcmd_clean {
+sub subcmd_clean() {
     src_req defaults => ["native", "flatpak"];
     src_handle native => sub {
         my @pkgs = split '\n', `$AUR_HELPER -Qdtq`;
@@ -60,11 +61,11 @@ sub subcmd_clean {
     }
 }
 
-sub subcmd_search {
+sub subcmd_search(@pkgs) {
     src_req defaults => ["native", "flatpak"], pkgs => 1;
-    src_handle native => sub { system $AUR_HELPER, "-Ss", @_},
+    src_handle native => sub { system $AUR_HELPER, "-Ss", @pkgs},
     flatpak => sub {
-        open my $cmd, "-|", "flatpak", "search", @_;
+        open my $cmd, "-|", "flatpak", "search", @pkgs;
         chomp(my @lines = <$cmd>);
         for (reverse @lines) {
             my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
@@ -78,25 +79,25 @@ sub subcmd_search {
     }
 }
 
-sub subcmd_install {
+sub subcmd_install(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle
-    native  => sub { system $AUR_HELPER, "-Syu", "--needed", @_ },
-    flatpak => sub { system "flatpak", "install", @_ }
+    native  => sub { system $AUR_HELPER, "-Syu", "--needed", @pkgs },
+    flatpak => sub { system "flatpak", "install", @pkgs }
 }
 
-sub subcmd_remove {
+sub subcmd_remove(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle
-    native  => sub { system $AUR_HELPER, "-Rscn", @_ },
-    flatpak => sub { system "flatpak", "uninstall", "--delete-data", @_ }
+    native  => sub { system $AUR_HELPER, "-Rscn", @pkgs },
+    flatpak => sub { system "flatpak", "uninstall", "--delete-data", @pkgs }
 }
 
-sub subcmd_which {
+sub subcmd_which(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
         my @cmd = $OPT{remote} ? ("pkgfile", "-v") : ($AUR_HELPER, "-Qo");
-        system @cmd, @_;
+        system @cmd, @pkgs;
     }
 }
 
