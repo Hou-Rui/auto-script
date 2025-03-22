@@ -1,16 +1,34 @@
 #!/usr/bin/env perl
 use v5.36;
+use threads;
+use Env 'HOME';
+use POSIX 'floor', 'ceil';
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Which;
+use File::Basename;
 use List::Util 'first';
 
 my (%SRC, %OPT);
 my $AUR_HELPER = first {defined which $_} ('yay', 'paru', 'pacman')
     or die "error: no AUR helper or pacman found.\n";
+my $SUDO = first {defined which $_} ('sudo', 'doas', 'pkexec')
+    or die "error: no sudo utility found.\n";
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
 my $SUBCMD = shift;
 
+sub title($fmt, @args) {
+    my $str = sprintf $fmt, @args;
+    my ($s1, $s2) = map {$_->((80 - length $str) / 2)} (\&floor, \&ceil);
+    my $line = sprintf "%s $str %s", '⎼' x $s1, '⎼' x $s2;
+    say colored($line, "bold");
+}
+sub subtitle($fmt, @args) {
+    my $str = sprintf $fmt, @args;
+    say colored(":: ", "bold blue"), colored($str, "bold");
+}
+
+sub pkgs_str           { join ", ", @ARGV }
 sub src_str            { join ", ", grep {$SRC{$_}} @ALL_SRC }
 sub src_count          { scalar grep {defined $_} values %SRC }
 
@@ -22,8 +40,9 @@ sub die_not_exclusive  { die_msg "multiple sources", src_str, "specified" }
 sub die_no_pkgs        { die_msg "no packages specified" }
 
 sub src_req(%req) {
-    my $defaults = $req{defaults};
-    map {$SRC{$_} = 1} @{$defaults} if defined $defaults and src_count == 0;
+    if (src_count == 0 and my $defaults = $req{defaults}) {
+        $SRC{$_} = 1 for @{$defaults};
+    }
     src_count == 1 or die_not_exclusive if $req{exclusive};
     @ARGV or die_no_pkgs if $req{pkgs};
 }
@@ -38,12 +57,17 @@ sub src_handle(%handlers) {
     src_count == 0 or die_not_applicable;
 }
 
+sub flag_yes_native    { $OPT{yes} ? ("--noconfirm") : () }
+sub flag_yes_flatpak   { $OPT{yes} ? ("--assumeyes") : () }
+
 sub subcmd_info(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
+        title "Querying information on native package(s) %s...", pkgs_str;
         my $query = $OPT{remote} ? "-Sii" : "-Qii";
         system $AUR_HELPER, $query, @pkgs;
     }, flatpak => sub {
+        title "Querying information on flatpak package(s) %s...", pkgs_str;
         system "flatpak", "info", @pkgs;
     }
 }
@@ -51,13 +75,19 @@ sub subcmd_info(@pkgs) {
 sub subcmd_clean() {
     src_req defaults => ["native", "flatpak"];
     src_handle native => sub {
-        my @pkgs = split '\n', `$AUR_HELPER -Qdtq`;
-        my $yes_flag = $OPT{yes} ? "--noconfirm" : "";
-        system "$AUR_HELPER -Rscn @pkgs $yes_flag" if @pkgs;
+        title 'Cleaning native packages...';
+        subtitle 'Removing unneeded packages...';
+        if (my @pkgs = split '\n', `$AUR_HELPER -Qdtq`) {
+            system $AUR_HELPER, "-Rscn", @pkgs, flag_yes_native;
+        } else {
+            say "Nothing unused to uninstall";
+        }
+        subtitle 'Cleaning cache...';
         system "yes | $AUR_HELPER -Sccd";
     }, flatpak => sub {
-        my $yes_flag = $OPT{yes} ? "--assumeyes" : "";
-        system "flatpak uninstall --unused --delete-data $yes_flag";
+        title 'Cleaning flatpak packages...';
+        my @flags = ("--unused", "--delete-data", flag_yes_flatpak);
+        system "flatpak", "uninstall", @flags;
     }
 }
 
@@ -70,8 +100,8 @@ sub subcmd_search(@pkgs) {
         for (reverse @lines) {
             my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
             $remote = colored $remote, "bold blue";
-            $appid = colored $appid, "bold";
-            $ver = colored $ver, "cyan";
+            $appid  = colored $appid, "bold";
+            $ver    = colored $ver, "cyan";
             say "$remote/$appid $ver ($branch)";
             say "    $name: $desc";
         }
@@ -81,36 +111,72 @@ sub subcmd_search(@pkgs) {
 
 sub subcmd_install(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
-    src_handle
-    native  => sub { system $AUR_HELPER, "-Syu", "--needed", @pkgs },
-    flatpak => sub { system "flatpak", "install", @pkgs }
+    src_handle native => sub {
+        title "Installing native package(s) %s...", pkgs_str
+        system $AUR_HELPER, "-S", @pkgs, flag_yes_native
+    }, flatpak => sub {
+        title "Installing flatpak package(s) %s...", pkgs_str
+        system "flatpak", "install", @pkgs;
+    }
 }
 
 sub subcmd_remove(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
-    src_handle
-    native  => sub { system $AUR_HELPER, "-Rscn", @pkgs },
+    src_handle native  => sub { system $AUR_HELPER, "-Rscn", @pkgs },
     flatpak => sub { system "flatpak", "uninstall", "--delete-data", @pkgs }
 }
 
 sub subcmd_which(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
+        title "Querying which package provides %s...", pkgs_str;
         my @cmd = $OPT{remote} ? ("pkgfile", "-v") : ($AUR_HELPER, "-Qo");
         system @cmd, @pkgs;
+    }
+}
+
+sub subcmd_update(@pkgs) {
+    src_req defaults => \@ALL_SRC;
+    src_handle native => sub {
+        title "Updating native plugins...";
+        my @flags = @pkgs ? ("-S", "--needed", @pkgs) : ("-Syu", "--devel");
+        system $AUR_HELPER, @flags, flag_yes_native;
+        system $SUDO, "pkgfile", "-u";
+    }, flatpak => sub {
+        title "Updating Flatpak plugins...";
+        system "flatpak", "update", flag_yes_flatpak;
+    }, zsh => sub {
+        if (-d "$HOME/.zplug") {
+            title "Updating ZPlug plugins...";
+            system "zsh", "-ic", "zplug update";
+        } elsif (-d (my $omz_path = "$HOME/.oh-my-zsh")) {
+            title "Updating Oh-My-Zsh plugins...";
+            system "zsh", "-c", "$omz_path/tools/upgrade.sh";
+            my $custom = "$omz_path/custom";
+            for ((glob "$custom/plugins/*"), (glob "$custom/themes/*")) {
+                next unless -d "$_/.git";
+                subtitle "Updating plugin %s...", basename $_;
+                threads->create(sub { system "cd $_; git pull" });
+            }
+            $_->join for threads->list;
+        }
+    }, vim => sub {
+        title "Updating Vim plugins...";
+        system "nvim", "+Lazy! sync", "+qa", "--headless";
+        say "Done."
     }
 }
 
 die_no_subcmd if not defined $SUBCMD;
 Getopt::Long::Configure "gnu_getopt";
 GetOptions (
-    "n|native" => \$SRC{native},
+    "n|native"  => \$SRC{native},
     "f|flatpak" => \$SRC{flatpak},
-    "z|zsh" => \$SRC{zsh},
-    "v|vim" => \$SRC{vim},
-    "w|remote" => \$OPT{remote},
-    "y|yes" => \$OPT{yes},
-) or die "failed to parse options\n";
+    "z|zsh"     => \$SRC{zsh},
+    "v|vim"     => \$SRC{vim},
+    "w|remote"  => \$OPT{remote},
+    "y|yes"     => \$OPT{yes},
+) or die "error: failed to parse options\n";
 
 my $handler = "subcmd_$SUBCMD";
 die_unknown_subcmd if not exists &$handler;
