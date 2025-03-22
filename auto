@@ -63,6 +63,32 @@ sub src_handle(%handlers) {
 sub flag_yes_native  { $OPT{yes} ? ("--noconfirm") : () }
 sub flag_yes_flatpak { $OPT{yes} ? ("--assumeyes") : () }
 
+sub subcmd_help($exit_code = 0) {
+    say qq {Usage: auto <command> [options] [packages]
+
+Available commands:
+  install:    install package(s) (default to native)
+  remove:     remove package(s) (default to native)
+  search:     search package(s) in remote repositories (default to native and flatpak)
+  update:     update package(s) (default to native, flatpak, zsh, vim)
+  clean:      clean cache and unused packages (default to native and flatpak)
+  info:       display info for a package (default to native)
+  which:      query which package owns an executable (default to native)
+  list:       list installed packages (default to native and flatpak)
+  help:       display this message
+
+Available options:
+  -n, --native:     apply operation on native packages
+  -f, --flatpak:    apply operation on flatpak packages
+  -v, --vim:        apply operation on vim packages
+  -z, --zsh:        apply operation on zsh packages
+  -y, --yes:        skip all confirmation
+  -w, --remote:     (only for info and which) display or query remote info
+  -h, --help:       display this message
+};
+    exit $exit_code;
+}
+
 sub subcmd_info(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
@@ -103,7 +129,7 @@ sub parse_flatpak(%req) {
     @lines = reverse @lines if $reversed;
     for (@lines) {
         my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
-        next unless not $pat or grep /$pat/, ($name, $appid, $desc);
+        next if $pat and not grep /$pat/, ($name, $appid, $desc);
         $remote = colored $remote, "bold blue";
         $appid  = colored $appid, "bold";
         $ver    = colored $ver, "cyan";
@@ -208,6 +234,7 @@ GetOptions (
     "v|vim"     => \$SRC{vim},
     "w|remote"  => \$OPT{remote},
     "y|yes"     => \$OPT{yes},
+    "h|help"    => subcmd_help
 ) or die "error: failed to parse options\n";
 
 my $handler = "subcmd_$SUBCMD";
