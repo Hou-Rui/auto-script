@@ -229,7 +229,7 @@ sub subcmd_update(@pkgs) {
         }
     }, vim => sub {
         title "Updating Vim plugins...";
-        system "nvim +Lazy! sync +qa --headless";
+        system "nvim", "+Lazy! sync", "+qa", "--headless";
         say "Done."
     }
 }
