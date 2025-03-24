@@ -136,6 +136,7 @@ sub parse_flatpak(%req) {
     chomp(my @lines = <$out>);
     @lines = reverse @lines if $reversed;
     for (@lines) {
+        last if $_ eq "No matches found";
         my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
         next if $pat and not grep /$pat/i, ($name, $appid, $desc);
         $remote = colored $remote, "bold blue";
