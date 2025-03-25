@@ -90,54 +90,69 @@ Available options:
 }
 
 package Flatpak {
-    use Term::ANSIColor;
     use List::Util 'any';
+
+    sub new($class, $cols, @args) {
+        my $self = {};
+        $self->{$_} = shift @args for @$cols;
+        bless $self, $class;
+    }
+
+    sub match($self, @pkgs) {
+        for my $pkg (@pkgs) {
+            return 1 if any { $self->{$_} =~ /$pkg/i }
+                ('name', 'application', 'description');
+        }
+        return 0;
+    }
+}
+
+package FlatpakList {
+    use Term::ANSIColor;
     use Scalar::Util 'blessed';
 
-    sub new($class, $cmds, $cols, $cond) {
+    sub new($class, $cmds, $cols, @pkgs) {
         my $self = [];
-        $cols = ["name", "description", "application", "version", "branch", @$cols];
+        $cols = ['name', 'description', 'application', 'version', 'branch', @$cols];
         my $cols_str = join ',', @$cols;
         open my $out, "-|", "flatpak", @$cmds, "--columns=$cols_str";
         while (<$out>) {
             chomp;
             last if $_ eq "No matches found";
-            my @args = split '\t';
-            my $element = {};
-            $element->{$_} = shift @args for @$cols;
-            next if defined $cond and not &$cond($element);
-            push @$self, $element;
+            my $flatpak = Flatpak->new($cols, split '\t');
+            next if @pkgs and not $flatpak->match(@pkgs);
+            push @$self, $flatpak;
         }
         close $out;
         bless $self, $class;
     }
+
     sub reversed($self) {
         my @result = reverse @$self;
         bless \@result, blessed($self);
     }
+
     sub new_list($class, @pkgs) {
-        Flatpak->new(["list"], ["origin", "ref"], sub($e) {
-            any {
-                my $pkg = $_;
-                grep {$e->{$_} =~ /$pkg/i} ('name', 'application', 'description')
-            } @pkgs;
-        });
+        FlatpakList->new(['list'], ['origin', 'ref'], @pkgs);
     }
+
     sub new_search($class, @pkgs) {
-        Flatpak->new(["search", @pkgs], ["remotes"], undef)->reversed;
+        FlatpakList->new(['search', @pkgs], ['remotes'])->reversed;
     }
+
     sub refs($self) {
-        map {$_->{"ref"}} @{$self}
+        map {$_->{ref}} @$self;
     }
+
     sub print($self) {
-        for (@{$self}) {
-            my $remote_str = $_->{remotes} // $_->{origin};
+        for my $f (@$self) {
+            my $remote_str = $f->{remotes} // $f->{origin};
             my $remote = colored $remote_str, "bold blue";
-            my $appid  = colored $_->{application}, "bold";
-            my $branch = colored $_->{branch}, "bold green";
-            my $ver    = colored $_->{version}, "cyan";
+            my $appid  = colored $f->{application}, "bold";
+            my $branch = colored $f->{branch}, "bold green";
+            my $ver    = colored $f->{version}, "cyan";
             say "$remote/$appid $branch $ver";
-            printf "    %s: %s\n", $_->{name}, $_->{description};
+            printf "    %s: %s\n", $f->{name}, $f->{description};
         }
     }
 }
@@ -150,7 +165,7 @@ sub subcmd_info(@pkgs) {
         system $AUR_HELPER, $query, @pkgs;
     }, flatpak => sub {
         title "Querying information on flatpak package(s) %s...", pkgs_str;
-        for my $ref (Flatpak->new_list(@pkgs)->refs) {
+        for my $ref (FlatpakList->new_list(@pkgs)->refs) {
             subtitle "Querying information for $ref...";
             system "flatpak", "info", $ref;
         };
@@ -183,7 +198,7 @@ sub subcmd_search(@pkgs) {
         system $AUR_HELPER, "-Ss", @pkgs;
     }, flatpak => sub {
         title "Searching Flatpak package(s) %s...", pkgs_str;
-        Flatpak->new_search(@pkgs)->print;
+        FlatpakList->new_search(@pkgs)->print;
     }
 }
 
@@ -217,7 +232,7 @@ sub subcmd_list(@pkgs) {
     }, flatpak => sub {
         title "Listing Flatpak package(s) %s...", pkgs_str;
         my $pat = join " ", @pkgs;
-        Flatpak->new_list(@pkgs)->print;
+        FlatpakList->new_list(@pkgs)->print;
     }
 }
 
@@ -239,7 +254,7 @@ sub subcmd_update(@pkgs) {
         system $SUDO, "pkgfile", "-u";
     }, flatpak => sub {
         title "Updating Flatpak plugin(s) %s...", pkgs_str;
-        system "flatpak", "update", flag_yes_flatpak, Flatpak->new(@pkgs)->refs;
+        system "flatpak", "update", flag_yes_flatpak, FlatpakList->new(@pkgs)->refs;
     }, zsh => sub {
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
