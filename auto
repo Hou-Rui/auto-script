@@ -163,10 +163,10 @@ sub subcmd_search(@pkgs) {
 sub subcmd_install(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
-        title "Installing native package(s) %s...", pkgs_str
-        system $AUR_HELPER, "-S", @pkgs, flag_yes_native
+        title "Installing native package(s) %s...", pkgs_str;
+        system $AUR_HELPER, "-S", @pkgs, flag_yes_native;
     }, flatpak => sub {
-        title "Installing flatpak package(s) %s...", pkgs_str
+        title "Installing flatpak package(s) %s...", pkgs_str;
         system "flatpak", "install", @pkgs;
     }
 }
@@ -204,15 +204,15 @@ sub subcmd_which(@pkgs) {
 }
 
 sub subcmd_update(@pkgs) {
-    src_req defaults => \@ALL_SRC;
+    src_req defaults => (@pkgs ? ["native"] : \@ALL_SRC);
     src_handle native => sub {
-        title "Updating native plugins...";
+        title "Updating native plugin(s) %s...", pkgs_str;
         my @flags = @pkgs ? ("-S", "--needed", @pkgs) : ("-Syu", "--devel");
         system $AUR_HELPER, @flags, flag_yes_native;
         system $SUDO, "pkgfile", "-u";
     }, flatpak => sub {
-        title "Updating Flatpak plugins...";
-        system "flatpak", "update", flag_yes_flatpak;
+        title "Updating Flatpak plugin(s) %s...", pkgs_str;
+        system "flatpak", "update", flag_yes_flatpak, @pkgs;
     }, zsh => sub {
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
