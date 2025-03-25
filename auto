@@ -6,7 +6,7 @@ use POSIX 'floor', 'ceil';
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Basename;
-use List::Util 'first';
+use List::Util 'first', 'all';
 
 my (%SRC, %OPT);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
@@ -89,6 +89,21 @@ Available options:
     exit $exit_code;
 }
 
+sub flatpak_pats_to_refs(@pats) {
+    open my $out, "-|", "flatpak", "list", "--columns=name,application,ref";
+    chomp(my @lines = <$out>);
+    my @info = map {
+        my ($name, $appid, $appref) = split '\t';
+        { name => $name, appid => $appid, appref => $appref }
+    } @lines;
+    my @refs;
+    for my $pat (@pats) {
+        my @matches = grep { grep /$pat/i, ($_->{name}, $_->{appid}) } @info;
+        die_msg "no matched found for $pat" unless @matches;
+    }
+    return \@refs;
+}
+
 sub subcmd_info(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
@@ -97,15 +112,10 @@ sub subcmd_info(@pkgs) {
         system $AUR_HELPER, $query, @pkgs;
     }, flatpak => sub {
         title "Querying information on flatpak package(s) %s...", pkgs_str;
-        my $pat = join " ", @pkgs;
-        open my $out, "-|", "flatpak", "list", "--columns=name,application,ref";
-        while (<$out>) {
-            chomp;
-            my ($name, $appid, $ref) = split '\t';
-            next if not grep /$pat/i, ($name, $appid);
-            subtitle "Information for ref $ref:";
+        for my $ref (@{flatpak_pats_to_refs @pkgs}) {
+            subtitle "Querying information for $ref...";
             system "flatpak", "info", $ref;
-        }
+        };
     }
 }
 
@@ -212,7 +222,8 @@ sub subcmd_update(@pkgs) {
         system $SUDO, "pkgfile", "-u";
     }, flatpak => sub {
         title "Updating Flatpak plugin(s) %s...", pkgs_str;
-        system "flatpak", "update", flag_yes_flatpak, @pkgs;
+        my @refs = @{flatpak_pats_to_refs @pkgs};
+        system "flatpak", "update", flag_yes_flatpak, @refs;
     }, zsh => sub {
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
