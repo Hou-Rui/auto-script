@@ -6,7 +6,7 @@ use POSIX 'floor', 'ceil';
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Basename;
-use List::Util 'first', 'all';
+use List::Util 'first';
 
 my (%SRC, %OPT);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
@@ -89,19 +89,57 @@ Available options:
     exit $exit_code;
 }
 
-sub flatpak_pats_to_refs(@pats) {
-    open my $out, "-|", "flatpak", "list", "--columns=name,application,ref";
-    chomp(my @lines = <$out>);
-    my @info = map {
-        my ($name, $appid, $appref) = split '\t';
-        { name => $name, appid => $appid, appref => $appref }
-    } @lines;
-    my @refs;
-    for my $pat (@pats) {
-        my @matches = grep { grep /$pat/i, ($_->{name}, $_->{appid}) } @info;
-        die_msg "no matched found for $pat" unless @matches;
+package Flatpak {
+    use Term::ANSIColor;
+    use List::Util 'any';
+    use Scalar::Util 'blessed';
+
+    sub new($class, $cmds, $cols, $cond) {
+        my $self = [];
+        $cols = ["name", "description", "application", "version", "branch", @$cols];
+        my $cols_str = join ',', @$cols;
+        open my $out, "-|", "flatpak", @$cmds, "--columns=$cols_str";
+        while (<$out>) {
+            chomp;
+            last if $_ eq "No matches found";
+            my @args = split '\t';
+            my $element = {};
+            $element->{$_} = shift @args for @$cols;
+            next if defined $cond and not &$cond($element);
+            push @$self, $element;
+        }
+        close $out;
+        bless $self, $class;
     }
-    return \@refs;
+    sub reversed($self) {
+        my @result = reverse @$self;
+        bless \@result, blessed($self);
+    }
+    sub new_list($class, @pkgs) {
+        Flatpak->new(["list"], ["origin", "ref"], sub($e) {
+            any {
+                my $pkg = $_;
+                grep {$e->{$_} =~ /$pkg/i} ('name', 'application', 'description')
+            } @pkgs;
+        });
+    }
+    sub new_search($class, @pkgs) {
+        Flatpak->new(["search", @pkgs], ["remotes"], undef)->reversed;
+    }
+    sub refs($self) {
+        map {$_->{"ref"}} @{$self}
+    }
+    sub print($self) {
+        for (@{$self}) {
+            my $remote_str = $_->{remotes} // $_->{origin};
+            my $remote = colored $remote_str, "bold blue";
+            my $appid  = colored $_->{application}, "bold";
+            my $branch = colored $_->{branch}, "bold green";
+            my $ver    = colored $_->{version}, "cyan";
+            say "$remote/$appid $branch $ver";
+            printf "    %s: %s\n", $_->{name}, $_->{description};
+        }
+    }
 }
 
 sub subcmd_info(@pkgs) {
@@ -112,7 +150,7 @@ sub subcmd_info(@pkgs) {
         system $AUR_HELPER, $query, @pkgs;
     }, flatpak => sub {
         title "Querying information on flatpak package(s) %s...", pkgs_str;
-        for my $ref (@{flatpak_pats_to_refs @pkgs}) {
+        for my $ref (Flatpak->new_list(@pkgs)->refs) {
             subtitle "Querying information for $ref...";
             system "flatpak", "info", $ref;
         };
@@ -138,27 +176,6 @@ sub subcmd_clean() {
     }
 }
 
-sub parse_flatpak(%req) {
-    my ($reversed, $cmd, $pat) = ($req{reversed}, $req{cmd}, $req{pat});
-    my $col_remote = defined $pat ? "origin" : "remotes";
-    open my $out, "-|", @{$cmd},
-        "--columns=name,description,application,version,branch,$col_remote";
-    chomp(my @lines = <$out>);
-    @lines = reverse @lines if $reversed;
-    for (@lines) {
-        last if $_ eq "No matches found";
-        my ($name, $desc, $appid, $ver, $branch, $remote) = split '\t';
-        next if $pat and not grep /$pat/i, ($name, $appid, $desc);
-        $remote = colored $remote, "bold blue";
-        $appid  = colored $appid, "bold";
-        $branch = colored $branch, "bold green";
-        $ver    = colored $ver, "cyan";
-        say "$remote/$appid $branch $ver";
-        say "    $name: $desc";
-    }
-    close $out;
-}
-
 sub subcmd_search(@pkgs) {
     src_req defaults => ["native", "flatpak"], pkgs => 1;
     src_handle native => sub {
@@ -166,7 +183,7 @@ sub subcmd_search(@pkgs) {
         system $AUR_HELPER, "-Ss", @pkgs;
     }, flatpak => sub {
         title "Searching Flatpak package(s) %s...", pkgs_str;
-        parse_flatpak reversed => 1, cmd => ["flatpak", "search", @pkgs];
+        Flatpak->new_search(@pkgs)->print;
     }
 }
 
@@ -200,7 +217,7 @@ sub subcmd_list(@pkgs) {
     }, flatpak => sub {
         title "Listing Flatpak package(s) %s...", pkgs_str;
         my $pat = join " ", @pkgs;
-        parse_flatpak cmd => ["flatpak", "list"], pat => $pat;
+        Flatpak->new_list(@pkgs)->print;
     }
 }
 
@@ -222,8 +239,7 @@ sub subcmd_update(@pkgs) {
         system $SUDO, "pkgfile", "-u";
     }, flatpak => sub {
         title "Updating Flatpak plugin(s) %s...", pkgs_str;
-        my @refs = @{flatpak_pats_to_refs @pkgs};
-        system "flatpak", "update", flag_yes_flatpak, @refs;
+        system "flatpak", "update", flag_yes_flatpak, Flatpak->new(@pkgs)->refs;
     }, zsh => sub {
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
