@@ -89,7 +89,7 @@ Available options:
     exit $exit_code;
 }
 
-package Flatpak {
+package FlatpakPkg {
     use List::Util 'any';
 
     sub new($class, $cols, @args) {
@@ -99,11 +99,10 @@ package Flatpak {
     }
 
     sub match($self, @pkgs) {
-        for my $pkg (@pkgs) {
-            return 1 if any { $self->{$_} =~ /$pkg/i }
-                ('name', 'application', 'description');
-        }
-        return 0;
+        any {
+            my ($pkg, @keys) = ($_, 'name', 'application', 'description');
+            any { $self->{$_} =~ /$pkg/i } @keys;
+        } @pkgs;
     }
 }
 
@@ -119,7 +118,7 @@ package FlatpakList {
         while (<$out>) {
             chomp;
             last if $_ eq "No matches found";
-            my $flatpak = Flatpak->new($cols, split '\t');
+            my $flatpak = FlatpakPkg->new($cols, split '\t');
             next if @pkgs and not $flatpak->match(@pkgs);
             push @$self, $flatpak;
         }
@@ -228,10 +227,9 @@ sub subcmd_list(@pkgs) {
     src_req defaults => ["native", "flatpak"];
     src_handle native => sub {
         title "Listing native package(s) %s...", pkgs_str;
-        system $AUR_HELPER, "-Qs", @pkgs
+        system $AUR_HELPER, "-Qs", @pkgs;
     }, flatpak => sub {
         title "Listing Flatpak package(s) %s...", pkgs_str;
-        my $pat = join " ", @pkgs;
         FlatpakList->new_list(@pkgs)->print;
     }
 }
@@ -254,7 +252,7 @@ sub subcmd_update(@pkgs) {
         system $SUDO, "pkgfile", "-u";
     }, flatpak => sub {
         title "Updating Flatpak plugin(s) %s...", pkgs_str;
-        system "flatpak", "update", flag_yes_flatpak, FlatpakList->new(@pkgs)->refs;
+        system "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
     }, zsh => sub {
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
