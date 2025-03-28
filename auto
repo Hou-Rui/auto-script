@@ -12,6 +12,10 @@ my (%SRC, %OPT);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
 my $SUBCMD = shift;
 
+sub pkgs_str           { join ", ", @ARGV }
+sub src_str            { join ", ", grep {$SRC{$_}} @ALL_SRC }
+sub src_count          { scalar grep {defined $_} values %SRC }
+
 sub die_err            { die "error: @_.\ntype 'auto help' to see usage.\n" }
 sub die_err_sub        { die "error in $SUBCMD: @_.\ntype 'auto help' to see usage.\n" }
 sub die_no_subcmd      { die_err "missing subcommand" }
@@ -34,14 +38,11 @@ sub title($fmt, @args) {
     my $line = sprintf "%s $str %s", '⎼' x $s1, '⎼' x $s2;
     say colored($line, "bold");
 }
+
 sub subtitle($fmt, @args) {
     my $str = sprintf $fmt, @args;
     say colored(":: ", "bold blue"), colored($str, "bold");
 }
-
-sub pkgs_str           { join ", ", @ARGV }
-sub src_str            { join ", ", grep {$SRC{$_}} @ALL_SRC }
-sub src_count          { scalar grep {defined $_} values %SRC }
 
 sub src_req(%req) {
     if (src_count == 0 and my $defaults = $req{defaults}) {
