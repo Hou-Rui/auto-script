@@ -44,6 +44,13 @@ sub subtitle($fmt, @args) {
     say colored(":: ", "bold blue"), colored($str, "bold");
 }
 
+sub src_options {
+    map {
+        my $short = substr $_, 0, 1;
+        "$short|$_" => \$SRC{$_}
+    } @ALL_SRC;
+}
+
 sub src_req(%req) {
     if (src_count == 0 and my $defaults = $req{defaults}) {
         $SRC{$_} = 1 for @$defaults;
@@ -93,13 +100,11 @@ Available options:
 
 package FlatpakPkg {
     use List::Util 'any';
-
     sub new($class, $cols, @args) {
         my $self = {};
         $self->{$_} = shift @args for @$cols;
         bless $self, $class;
     }
-
     sub match($self, @pkgs) {
         any {
             my ($pkg, @keys) = ($_, 'name', 'application', 'description');
@@ -111,7 +116,6 @@ package FlatpakPkg {
 package FlatpakList {
     use Term::ANSIColor;
     use Scalar::Util 'blessed';
-
     sub new($class, $cmds, $cols, @pkgs) {
         my $self = [];
         $cols = ['name', 'description', 'application', 'version', 'branch', @$cols];
@@ -127,24 +131,17 @@ package FlatpakList {
         close $out;
         bless $self, $class;
     }
-
     sub reversed($self) {
         my @result = reverse @$self;
         bless \@result, blessed($self);
     }
-
     sub new_list($class, @pkgs) {
-        FlatpakList->new(['list'], ['origin', 'ref'], @pkgs);
+        new $class, ['list'], ['origin', 'ref'], @pkgs;
     }
-
     sub new_search($class, @pkgs) {
-        FlatpakList->new(['search', @pkgs], ['remotes'])->reversed;
+        new($class, ['search', @pkgs], ['remotes'])->reversed;
     }
-
-    sub refs($self) {
-        map {$_->{ref}} @$self;
-    }
-
+    sub refs($self) { map {$_->{ref}} @$self }
     sub print($self) {
         for my $f (@$self) {
             my $remote_str = $f->{remotes} // $f->{origin};
@@ -282,11 +279,7 @@ sub subcmd_update(@pkgs) {
 die_no_subcmd if not defined $SUBCMD;
 subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
 Getopt::Long::Configure "gnu_getopt";
-GetOptions (
-    "n|native"  => \$SRC{native},
-    "f|flatpak" => \$SRC{flatpak},
-    "z|zsh"     => \$SRC{zsh},
-    "v|vim"     => \$SRC{vim},
+GetOptions (src_options,
     "w|remote"  => \$OPT{remote},
     "y|yes"     => \$OPT{yes},
     "h|help"    => \&subcmd_help
