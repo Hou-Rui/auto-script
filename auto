@@ -12,9 +12,17 @@ my (%SRC, %OPT);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
 my $SUBCMD = shift;
 
-sub which($bin) { first { -e "$_/$bin" } (split ":", $PATH) }
+sub die_err            { die "error: @_.\ntype 'auto help' to see usage.\n" }
+sub die_err_sub        { die "error in $SUBCMD: @_.\ntype 'auto help' to see usage.\n" }
+sub die_no_subcmd      { die_err "missing subcommand" }
+sub die_unknown_subcmd { die_err "unknown subcommand '$SUBCMD'" }
+sub die_not_applicable { die_err_sub "source(s)", src_str, "not applicable" }
+sub die_not_exclusive  { die_err_sub "multiple sources", src_str, "specified" }
+sub die_no_pkgs        { die_err_sub "no packages specified" }
+
+sub which($bin) { first { -x "$_/$bin" } (split ":", $PATH) }
 sub first_of($desc, @cmds) {
-    first {defined which $_} @cmds or die "error: no $desc found\n";
+    first {defined which $_} @cmds or die_err "no $desc found";
 }
 
 my $AUR_HELPER = first_of "AUR helpers", 'yay', 'paru', 'pacman';
@@ -35,16 +43,9 @@ sub pkgs_str           { join ", ", @ARGV }
 sub src_str            { join ", ", grep {$SRC{$_}} @ALL_SRC }
 sub src_count          { scalar grep {defined $_} values %SRC }
 
-sub die_msg            { die "error in $SUBCMD: @_.\n" }
-sub die_no_subcmd      { die "error: missing subcommand.\n" }
-sub die_unknown_subcmd { die "error: unknown subcommand '$SUBCMD'.\n" }
-sub die_not_applicable { die_msg "source(s)", src_str, "not applicable" }
-sub die_not_exclusive  { die_msg "multiple sources", src_str, "specified" }
-sub die_no_pkgs        { die_msg "no packages specified" }
-
 sub src_req(%req) {
     if (src_count == 0 and my $defaults = $req{defaults}) {
-        $SRC{$_} = 1 for @{$defaults};
+        $SRC{$_} = 1 for @$defaults;
     }
     src_count == 1 or die_not_exclusive if $req{exclusive};
     @ARGV or die_no_pkgs if $req{pkgs};
@@ -254,6 +255,7 @@ sub subcmd_update(@pkgs) {
         title "Updating Flatpak plugin(s) %s...", pkgs_str;
         system "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
     }, zsh => sub {
+        return if not defined which 'zsh';
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
             system "zsh", "-ic", "zplug update";
@@ -269,6 +271,7 @@ sub subcmd_update(@pkgs) {
             $_->join for threads->list;
         }
     }, vim => sub {
+        return if not defined which 'nvim';
         title "Updating Vim plugins...";
         system "nvim", "+Lazy! sync", "+qa", "--headless";
         say "Done."
@@ -276,6 +279,7 @@ sub subcmd_update(@pkgs) {
 }
 
 die_no_subcmd if not defined $SUBCMD;
+subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
 Getopt::Long::Configure "gnu_getopt";
 GetOptions (
     "n|native"  => \$SRC{native},
