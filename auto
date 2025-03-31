@@ -34,7 +34,7 @@ my $SUDO = first_of "sudo utilities", 'sudo', 'doas', 'pkexec';
 
 sub title($fmt, @args) {
     my $str = sprintf $fmt, @args;
-    my $len = (80 - length $str) / 2;
+    my $len = (`tput cols` - length($str) - 2) / 2;
     my ($s1, $s2) = map { max 0, $_->($len) } \&ceil, \&floor;
     my $line = sprintf "%s $str %s", '⎼' x $s1, '⎼' x $s2;
     say colored($line, "bold");
