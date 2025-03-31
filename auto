@@ -6,7 +6,7 @@ use POSIX 'floor', 'ceil';
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Basename;
-use List::Util 'first';
+use List::Util 'first', 'max';
 
 my (%SRC, %OPT);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
@@ -34,8 +34,8 @@ my $SUDO = first_of "sudo utilities", 'sudo', 'doas', 'pkexec';
 
 sub title($fmt, @args) {
     my $str = sprintf $fmt, @args;
-    my ($s1, $s2) = map {$_->((80 - length $str) / 2)} (\&ceil, \&floor);
-    my $line = sprintf "%s $str %s", '⎼' x $s1, '⎼' x $s2;
+    my $len = (80 - length $str) / 2;
+    my ($s1, $s2) = map { max(0, $_->($len)) } (\&ceil, \&floor);
     say colored($line, "bold");
 }
 
