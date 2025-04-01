@@ -38,8 +38,8 @@ sub title($fmt, @args) {
     my ($s1, $s2) = map {
         my $sep_len = max(1, $_->($len)) - 1;
         colored '⎼' x $sep_len, "dark white"
-    } \&ceil, \&floor;
-    say sprintf " $s1 %s $s2 ", colored($str, "bold");
+    } \&floor, \&ceil;
+    printf " $s1 %s $s2 \n", colored($str, "bold");
 }
 
 sub subtitle($fmt, @args) {
