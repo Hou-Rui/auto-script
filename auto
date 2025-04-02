@@ -1,8 +1,9 @@
 #!/usr/bin/env perl
 use v5.36;
+use autodie ':all';
 use threads;
 use Env 'HOME', 'PATH';
-use POSIX 'floor', 'ceil';
+use POSIX 'floor', 'ceil', 'SIGINT';
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Basename;
@@ -279,15 +280,22 @@ sub subcmd_update(@pkgs) {
     }
 }
 
-die_no_subcmd if not defined $SUBCMD;
-subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
-Getopt::Long::Configure "gnu_getopt";
-GetOptions (src_options,
-    "w|remote"  => \$OPT{remote},
-    "y|yes"     => \$OPT{yes},
-    "h|help"    => \&subcmd_help
-) or die "error: failed to parse options\n";
+eval {
+    die_no_subcmd if not defined $SUBCMD;
+    subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
+    Getopt::Long::Configure "gnu_getopt";
+    GetOptions src_options,
+        "w|remote"  => \$OPT{remote},
+        "y|yes"     => \$OPT{yes},
+        "h|help"    => \&subcmd_help
+    or die_err "failed to parse options";
 
-my $handler = "subcmd_$SUBCMD";
-die_unknown_subcmd if not exists &$handler;
-(\&$handler)->(@ARGV);
+    my $handler = "subcmd_$SUBCMD";
+    die_unknown_subcmd if not exists &$handler;
+    (\&$handler)->(@ARGV);
+};
+
+if (my $err = $@) {
+    die $err unless $err->isa('autodie::exception');
+    die "Interrupt received. Exiting...\n" if SIGINT == ($? & 127); 
+}
