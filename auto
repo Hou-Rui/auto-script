@@ -1,6 +1,5 @@
 #!/usr/bin/env perl
 use v5.36;
-use autodie ':all';
 use threads;
 use Env 'HOME', 'PATH';
 use POSIX 'floor', 'ceil', 'SIGINT';
@@ -19,15 +18,24 @@ sub src_count          { scalar grep {defined $_} values %SRC }
 
 sub die_err            { die "error: @_.\ntype 'auto help' to see usage.\n" }
 sub die_err_sub        { die "error in $SUBCMD: @_.\ntype 'auto help' to see usage.\n" }
+sub die_err_system     { die "error: failed to execute command @_\n" }
+sub die_sigint         { die "interrupt received, exiting...\n" }
 sub die_no_subcmd      { die_err "missing subcommand" }
 sub die_unknown_subcmd { die_err "unknown subcommand '$SUBCMD'" }
 sub die_not_applicable { die_err_sub "source(s)", src_str, "not applicable" }
 sub die_not_exclusive  { die_err_sub "multiple sources", src_str, "specified" }
 sub die_no_pkgs        { die_err_sub "no packages specified" }
 
-sub which($bin) { first { -x "$_/$bin" } (split ":", $PATH) }
+sub which($bin) {
+    first { -x "$_/$bin" } (split ":", $PATH);
+}
 sub first_of($desc, @cmds) {
-    first {defined which $_} @cmds or die_err "no $desc found";
+    first { defined which $_ } @cmds or die_err "no $desc found";
+}
+sub run(@args) {
+    return if system(@args) == 0;
+    die_sigint if ($? & 127) == SIGINT;
+    die_err_system @args;
 }
 
 my $AUR_HELPER = first_of "AUR helpers", 'yay', 'paru', 'pacman';
@@ -164,12 +172,12 @@ sub subcmd_info(@pkgs) {
     src_handle native => sub {
         title "Querying information on native package(s) %s...", pkgs_str;
         my $query = $OPT{remote} ? "-Sii" : "-Qii";
-        system $AUR_HELPER, $query, @pkgs;
+        run $AUR_HELPER, $query, @pkgs;
     }, flatpak => sub {
         title "Querying information on flatpak package(s) %s...", pkgs_str;
         for my $ref (FlatpakList->new_list(@pkgs)->refs) {
             subtitle "Querying information for $ref...";
-            system "flatpak", "info", $ref;
+            run "flatpak", "info", $ref;
         };
     }
 }
@@ -180,16 +188,16 @@ sub subcmd_clean() {
         title 'Cleaning native packages...';
         subtitle 'Removing unneeded packages...';
         if (my @pkgs = split '\n', `$AUR_HELPER -Qdtq`) {
-            system $AUR_HELPER, "-Rscn", @pkgs, flag_yes_native;
+            run $AUR_HELPER, "-Rscn", @pkgs, flag_yes_native;
         } else {
             say "Nothing unused to uninstall";
         }
         subtitle 'Cleaning cache...';
-        system "yes | $AUR_HELPER -Sccd";
+        run "yes | $AUR_HELPER -Sccd";
     }, flatpak => sub {
         title 'Cleaning flatpak packages...';
         my @flags = ("--unused", "--delete-data", flag_yes_flatpak);
-        system "flatpak", "uninstall", @flags;
+        run "flatpak", "uninstall", @flags;
     }
 }
 
@@ -197,7 +205,7 @@ sub subcmd_search(@pkgs) {
     src_req defaults => ["native", "flatpak"], pkgs => 1;
     src_handle native => sub {
         title "Searching native package(s) %s...", pkgs_str;
-        system $AUR_HELPER, "-Ss", @pkgs;
+        run $AUR_HELPER, "-Ss", @pkgs;
     }, flatpak => sub {
         title "Searching Flatpak package(s) %s...", pkgs_str;
         FlatpakList->new_search(@pkgs)->print;
@@ -208,10 +216,10 @@ sub subcmd_install(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
         title "Installing native package(s) %s...", pkgs_str;
-        system $AUR_HELPER, "-S", @pkgs, flag_yes_native;
+        run $AUR_HELPER, "-S", @pkgs, flag_yes_native;
     }, flatpak => sub {
         title "Installing flatpak package(s) %s...", pkgs_str;
-        system "flatpak", "install", @pkgs;
+        run "flatpak", "install", @pkgs;
     }
 }
 
@@ -219,10 +227,10 @@ sub subcmd_remove(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
         title "Removing native package(s) %s...", pkgs_str;
-        system $AUR_HELPER, "-Rscn", @pkgs;
+        run $AUR_HELPER, "-Rscn", @pkgs;
     }, flatpak => sub {
         title "Removing Flatpak package(s) %s...", pkgs_str;
-        system "flatpak", "uninstall", "--delete-data", @pkgs;
+        run "flatpak", "uninstall", "--delete-data", @pkgs;
     }
 }
 
@@ -230,7 +238,7 @@ sub subcmd_list(@pkgs) {
     src_req defaults => ["native", "flatpak"];
     src_handle native => sub {
         title "Listing native package(s) %s...", pkgs_str;
-        system $AUR_HELPER, "-Qs", @pkgs;
+        run $AUR_HELPER, "-Qs", @pkgs;
     }, flatpak => sub {
         title "Listing Flatpak package(s) %s...", pkgs_str;
         FlatpakList->new_list(@pkgs)->print;
@@ -242,7 +250,7 @@ sub subcmd_which(@pkgs) {
     src_handle native => sub {
         title "Querying which package provides %s...", pkgs_str;
         my @cmd = $OPT{remote} ? ("pkgfile", "-v") : ($AUR_HELPER, "-Qo");
-        system @cmd, @pkgs;
+        run @cmd, @pkgs;
     }
 }
 
@@ -251,51 +259,44 @@ sub subcmd_update(@pkgs) {
     src_handle native => sub {
         title "Updating native plugin(s) %s...", pkgs_str;
         my @flags = @pkgs ? ("-S", "--needed", @pkgs) : ("-Syu", "--devel");
-        system $AUR_HELPER, @flags, flag_yes_native;
-        system $SUDO, "pkgfile", "-u";
+        run $AUR_HELPER, @flags, flag_yes_native;
+        run $SUDO, "pkgfile", "-u";
     }, flatpak => sub {
         title "Updating Flatpak plugin(s) %s...", pkgs_str;
-        system "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
+        run "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
     }, zsh => sub {
         return if not defined which 'zsh';
         if (-d "$HOME/.zplug") {
             title "Updating ZPlug plugins...";
-            system "zsh", "-ic", "zplug update";
+            run "zsh", "-ic", "zplug update";
         } elsif (-d (my $omz_path = "$HOME/.oh-my-zsh")) {
             title "Updating Oh-My-Zsh plugins...";
-            system "zsh", "-c", "$omz_path/tools/upgrade.sh";
+            run "zsh", "-c", "$omz_path/tools/upgrade.sh";
             my $custom = "$omz_path/custom";
             for (glob("$custom/plugins/*"), glob("$custom/themes/*")) {
                 next unless -d "$_/.git";
                 subtitle "Updating plugin %s...", basename $_;
-                threads->create(sub { system "cd $_; git pull" });
+                threads->create(sub { run "cd $_; git pull" });
             }
             $_->join for threads->list;
         }
     }, vim => sub {
         return if not defined which 'nvim';
         title "Updating Vim plugins...";
-        system "nvim", "+Lazy! sync", "+qa", "--headless";
+        run "nvim", "+Lazy! sync", "+qa", "--headless";
         say "Done."
     }
 }
 
-eval {
-    die_no_subcmd if not defined $SUBCMD;
-    subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
-    Getopt::Long::Configure "gnu_getopt";
-    GetOptions src_options,
-        "w|remote"  => \$OPT{remote},
-        "y|yes"     => \$OPT{yes},
-        "h|help"    => \&subcmd_help
-    or die_err "failed to parse options";
+die_no_subcmd if not defined $SUBCMD;
+subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
+Getopt::Long::Configure "gnu_getopt";
+GetOptions src_options,
+    "w|remote"  => \$OPT{remote},
+    "y|yes"     => \$OPT{yes},
+    "h|help"    => \&subcmd_help
+or die_err "failed to parse options";
 
-    my $handler = "subcmd_$SUBCMD";
-    die_unknown_subcmd if not exists &$handler;
-    (\&$handler)->(@ARGV);
-};
-
-if (my $err = $@) {
-    die $err unless $err->isa('autodie::exception');
-    die "Interrupt received. Exiting...\n" if SIGINT == ($? & 127); 
-}
+my $handler = "subcmd_$SUBCMD";
+die_unknown_subcmd if not exists &$handler;
+(\&$handler)->(@ARGV);
