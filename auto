@@ -111,11 +111,9 @@ Available options:
 }
 
 package FlatpakPkg {
-    use List::Util 'any';
+    use List::Util 'any', 'mesh';
     sub new($class, $cols, @args) {
-        my $self = {};
-        $self->{$_} = shift @args for @$cols;
-        bless $self, $class;
+        bless { mesh $cols, \@args }, $class;
     }
     sub match($self, @pkgs) {
         any {
