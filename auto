@@ -18,8 +18,6 @@ sub src_count          { scalar grep {defined $_} values %SRC }
 
 sub die_err            { die "error: @_.\ntype 'auto help' to see usage.\n" }
 sub die_err_sub        { die "error in $SUBCMD: @_.\ntype 'auto help' to see usage.\n" }
-sub die_err_system     { die "error: failed to execute command @_\n" }
-sub die_sigint         { die "interrupt received, exiting...\n" }
 sub die_no_subcmd      { die_err "missing subcommand" }
 sub die_unknown_subcmd { die_err "unknown subcommand '$SUBCMD'" }
 sub die_not_applicable { die_err_sub "source(s)", src_str, "not applicable" }
@@ -33,9 +31,7 @@ sub first_of($desc, @cmds) {
     first { defined which $_ } @cmds or die_err "no $desc found";
 }
 sub run(@args) {
-    return if system(@args) == 0;
-    die_sigint if ($? & 127) == SIGINT;
-    die_err_system @args;
+    exit $? if system(@args) != 0;
 }
 
 my $AUR_HELPER = first_of "AUR helpers", 'yay', 'paru', 'pacman';
@@ -180,7 +176,7 @@ sub subcmd_info(@pkgs) {
     }
 }
 
-sub subcmd_clean() {
+sub subcmd_clean {
     src_req defaults => ["native", "flatpak"];
     src_handle native => sub {
         title 'Cleaning native packages...';
