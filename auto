@@ -214,7 +214,7 @@ sub subcmd_search(@pkgs) {
         FlatpakList->new_search(@pkgs)->print;
     }, vim => sub {
         title "Searching Vim plugins(s) %s...", pkgs_str;
-        github_search "neovim,vim", @pkgs;
+        github_search "neovim,nvim,vim", @pkgs;
     }, zsh => sub {
         title "Searching Zsh plugins(s) %s...", pkgs_str;
         github_search "zsh", @pkgs;
