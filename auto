@@ -77,8 +77,10 @@ sub src_handle(%handlers) {
     src_count == 0 or die_not_applicable;
 }
 
-sub flag_yes_native  { $OPT{yes} ? ("--noconfirm") : () }
-sub flag_yes_flatpak { $OPT{yes} ? ("--assumeyes") : () }
+sub flag_yes_native    { $OPT{yes} ? ("--noconfirm") : () }
+sub flag_yes_flatpak   { $OPT{yes} ? ("--assumeyes") : () }
+sub flag_force_native  { $OPT{force} ? ("--overwrite") : () }
+sub flag_force_flatpak { $OPT{force} ? ("--reinstall") : () }
 
 sub subcmd_help($exit_code = 0) {
     say qq {Usage: auto <command> [options] [packages]
@@ -101,6 +103,7 @@ Available options:
   -z, --zsh:        apply operation on zsh packages
   -y, --yes:        skip all confirmation
   -w, --remote:     (only for info and which) display or query remote info
+  -x, --force:      (only for install) force options
   -h, --help:       display this message
 };
     exit $exit_code;
@@ -195,6 +198,11 @@ sub subcmd_clean {
     }
 }
 
+sub github_search($topic, @pkgs) {
+    my $gh = first_of "GitHub CLI", "gh";
+    run $gh, "search", "repos", "--topic=$topic", @pkgs;
+}
+
 sub subcmd_search(@pkgs) {
     src_req defaults => ["native", "flatpak"], pkgs => 1;
     src_handle native => sub {
@@ -203,6 +211,12 @@ sub subcmd_search(@pkgs) {
     }, flatpak => sub {
         title "Searching Flatpak package(s) %s...", pkgs_str;
         FlatpakList->new_search(@pkgs)->print;
+    }, vim => sub {
+        title "Searching Vim plugins(s) %s...", pkgs_str;
+        github_search "neovim,vim", @pkgs;
+    }, zsh => sub {
+        title "Searching Zsh plugins(s) %s...", pkgs_str;
+        github_search "zsh", @pkgs;
     }
 }
 
@@ -210,10 +224,10 @@ sub subcmd_install(@pkgs) {
     src_req defaults => ["native"], exclusive => 1, pkgs => 1;
     src_handle native => sub {
         title "Installing native package(s) %s...", pkgs_str;
-        run $AUR_HELPER, "-S", @pkgs, flag_yes_native;
+        run $AUR_HELPER, "-S", @pkgs, flag_yes_native, flag_force_native;
     }, flatpak => sub {
         title "Installing flatpak package(s) %s...", pkgs_str;
-        run "flatpak", "install", @pkgs;
+        run "flatpak", "install", @pkgs, flag_yes_flatpak, flag_force_flatpak;
     }
 }
 
@@ -286,9 +300,10 @@ die_no_subcmd if not defined $SUBCMD;
 subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
 Getopt::Long::Configure "gnu_getopt";
 GetOptions src_options,
-    "w|remote"  => \$OPT{remote},
-    "y|yes"     => \$OPT{yes},
-    "h|help"    => \&subcmd_help
+    "w|remote" => \$OPT{remote},
+    "x|force"  => \$OPT{force},
+    "y|yes"    => \$OPT{yes},
+    "h|help"   => \&subcmd_help
 or die_err "failed to parse options";
 
 my $handler = "subcmd_$SUBCMD";
