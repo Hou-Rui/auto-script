@@ -200,6 +200,7 @@ sub subcmd_clean {
 
 sub github_search($topic, @pkgs) {
     my $gh = first_of "GitHub CLI", "gh";
+    $ENV{GH_PAGER} = '';
     run $gh, "search", "repos", "--topic=$topic", @pkgs;
 }
 
