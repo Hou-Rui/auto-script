@@ -189,6 +189,10 @@ sub subcmd_clean {
         } else {
             say "Nothing unused to uninstall";
         }
+        if (my @downloads = grep { -d $_ } glob '/var/cache/pacman/pkg/download*') {
+            subtitle "Removing pacman download remains...";
+            run $SUDO, 'rm', '-r', $_ for @downloads;
+        }
         subtitle 'Cleaning cache...';
         run "yes | $AUR_HELPER -Sccd";
     }, flatpak => sub {
