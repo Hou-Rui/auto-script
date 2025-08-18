@@ -1,0 +1,57 @@
+#compdef auto
+
+local line state subcmd
+_arguments -C "1: :->cmds" "*::arg:->args"
+case "$state" in
+  (cmds)
+    _values 'auto command' \
+            'install[install package(s) (default to native)]' \
+            'remove[remove package(s) (default to native)]' \
+            'search[search package(s) in remote repositories (default to native and flatpak)]' \
+            'update[update package(s) (default to native, flatpak, zsh, vim)]' \
+            'clean[clean cache and unused packages (default to native and flatpak)]' \
+            'info[display info for a package (default to native)]' \
+            'which[query which package owns an executable (default to native)]' \
+            'list[list installed packages (default to native and flatpak)]' \
+            'help[display this message]' ;;
+  (args)
+    subcmd="$line[1]"
+    (( $+functions[_auto_$subcmd] )) && _auto_$subcmd;;
+esac
+
+_auto_remote_packages() {
+  local -a pkgs
+  local prefix="$PREFIX"
+  if [[ -z "$prefix" ]]; then
+    pkgs=($(pacman -Slq))
+  else
+    pkgs=($(pacman -Slq | grep $prefix))
+  fi
+  _describe "packges" pkgs
+}
+
+_auto_local_packages() {
+  local -a pkgs
+  local prefix="$PREFIX"
+  if [[ -z "$prefix" ]]; then
+    pkgs=($(pacman -Qq))
+  else
+    pkgs=($(pacman -Qq | grep $prefix))
+  fi
+  _describe "packages" pkgs
+}
+
+_auto_install() { _auto_remote_packages }
+
+_auto_update() { _auto_local_packages }
+
+_auto_search() { _auto_remote_packages }
+
+_auto_remove() { _auto_local_packages }
+
+_auto_clean() { }
+
+_auto_which() { _path_commands }
+
+_auto_info() { _auto_local_packages }
+
