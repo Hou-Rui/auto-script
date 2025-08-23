@@ -25,10 +25,11 @@ _auto_remote_packages() {
 }
 
 _auto_local_packages() {
-  local pkgs=($(pacman -Qq))
-  if whence flatpak &> /dev/null; then
-    pkgs+=($(flatpak list --columns=app | sort | uniq))
-  fi
+  IFS=$'\n' local pkgs=($(python -c '
+from pyalpm import Handle
+db = Handle(".", "/var/lib/pacman").get_localdb()
+for pkg in db.pkgcache:
+  print(f"{pkg.name}:{pkg.desc}")'))
   _describe "packages" pkgs
 }
 
