@@ -2,7 +2,7 @@
 
 set -eu
 
-PREFIX="${PREFIX:-/usr/local}"
+PREFIX="${1:-/usr/local}"
 ZSH_CUSTOM="${ZSH_CUSTOM:-$PREFIX/share/zshcustom}"
 
 local script="$PREFIX/bin/auto"
