@@ -20,14 +20,25 @@ case "$state" in
 esac
 
 _auto_remote_packages() {
-  local pkgs=($(pacman -Ssq $PREFIX))
+  IFS=$'\n' local pkgs=($(python -c '
+import pyalpm
+from sys import argv
+from pathlib import Path
+handle = pyalpm.Handle("/", "/var/lib/pacman")
+db_paths = Path("/var/lib/pacman/sync/").glob("*.db")
+for path in db_paths:
+  handle.register_syncdb(path.stem, pyalpm.SIG_DATABASE_OPTIONAL)
+for db in handle.get_syncdbs():
+  for pkg in db.search(f"{argv[1]}.*"):
+    print(f"{pkg.name}:{pkg.desc}")
+  ' "$PREFIX"))
   _describe "packages" pkgs
 }
 
 _auto_local_packages() {
   IFS=$'\n' local pkgs=($(python -c '
 from pyalpm import Handle
-db = Handle(".", "/var/lib/pacman").get_localdb()
+db = Handle("/", "/var/lib/pacman").get_localdb()
 for pkg in db.pkgcache:
   print(f"{pkg.name}:{pkg.desc}")'))
   _describe "packages" pkgs
