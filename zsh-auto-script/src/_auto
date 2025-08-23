@@ -20,23 +20,26 @@ case "$state" in
 esac
 
 _auto_remote_packages() {
-  local -a pkgs
-  local prefix="$PREFIX"
-  if [[ -z "$prefix" ]]; then
-    pkgs=($(pacman -Slq))
+  local pkgs=()
+  if [[ -n "$PREFIX" ]]; then
+    pkgs=($(pacman -Slq | grep $PREFIX))
   else
-    pkgs=($(pacman -Slq | grep $prefix))
+    pkgs=($(pacman -Slq))
   fi
   _describe "packges" pkgs
 }
 
 _auto_local_packages() {
-  local -a pkgs
-  local prefix="$PREFIX"
-  if [[ -z "$prefix" ]]; then
-    pkgs=($(pacman -Qq))
-  else
-    pkgs=($(pacman -Qq | grep $prefix))
+  local pkgs=($(pacman -Qq))
+  if whence flatpak &> /dev/null; then
+    pkgs+=($(flatpak list --columns=app | sort | uniq))
+  fi
+  if [[ -n "$PREFIX" ]]; then
+    local filtered=()
+    for pkg in "$pkgs[@]"; do
+      [[ $pkg =~ "$PREFIX" ]] && filtered+=($pkg)
+    done
+    pkgs=($filtered[@])
   fi
   _describe "packages" pkgs
 }
