@@ -23,9 +23,9 @@ Available commands:
   remove:     remove package(s) (default to native)
   search:     search package(s) in remote repositories (default to native and flatpak)
   update:     update package(s) (default to native, flatpak, zsh, vim)
-  autoremove: remove unused packages (default to native and flatpak)
   clean:      clean cache and unused packages (default to native and flatpak)
   info:       display info for a package (default to native)
+  files:      list installed files for a package (default to native)
   which:      query which package owns an executable (default to native)
   list:       list installed packages (default to native and flatpak)
   help:       display this message
@@ -35,11 +35,10 @@ Available options:
   -f, --flatpak:    apply operation on flatpak packages
   -v, --vim:        apply operation on vim packages
   -z, --zsh:        apply operation on zsh packages
-  -y, --noconfirm:  skip all confirmation
-  -r, --regex:      (only for search) use regular expression in searching terms
+  -y, --yes:        skip all confirmation
   -w, --remote:     (only for info and which) display or query remote info
-  -e <src>,
-  --exclude <src>:  exclude source when performing operation
+  -x, --force:      (only for install) force options
+  -h, --help:       display this message
 ```
 
 ## Dependencies
