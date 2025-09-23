@@ -11,6 +11,7 @@ case "$state" in
             'update[update package(s) (default to native, flatpak, zsh, vim)]' \
             'clean[clean cache and unused packages (default to native and flatpak)]' \
             'info[display info for a package (default to native)]' \
+            'files[list installed files for a package (default to native)]' \
             'which[query which package owns an executable (default to native)]' \
             'list[list installed packages (default to native and flatpak)]' \
             'help[display this message]' ;;
@@ -57,4 +58,6 @@ _auto_clean() { }
 _auto_which() { _path_commands }
 
 _auto_info() { _auto_local_packages }
+
+_auto_files() { _auto_local_packages }
 

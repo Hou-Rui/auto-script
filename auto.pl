@@ -7,6 +7,7 @@ use Getopt::Long;
 use Term::ANSIColor;
 use File::Basename;
 use List::Util 'first', 'max';
+use String::Util 'trim';
 
 my (%SRC, %OPT);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
@@ -92,6 +93,7 @@ Available commands:
   update:     update package(s) (default to native, flatpak, zsh, vim)
   clean:      clean cache and unused packages (default to native and flatpak)
   info:       display info for a package (default to native)
+  files:      list installed files for a package (default to native)
   which:      query which package owns an executable (default to native)
   list:       list installed packages (default to native and flatpak)
   help:       display this message
@@ -176,6 +178,24 @@ sub subcmd_info(@pkgs) {
             subtitle "Querying information for $ref...";
             run "flatpak", "info", $ref;
         };
+    }
+}
+
+sub subcmd_files(@pkgs) {
+    src_req defaults => ["native"], exclusive => 1, pkgs => 1;
+    src_handle native => sub {
+        title "Querying installed files of native package(s) %s...", pkgs_str;
+        if ($OPT{remote}) {
+            run 'pkgfile', '--list', @pkgs;
+        } else {
+            run $AUR_HELPER, '-Ql', @pkgs;
+        }
+    }, flatpak => sub {
+        title "Querying installed files of Flatpak package(s) %s...", pkgs_str;
+        for my $ref (FlatpakList->new_list(@pkgs)->refs) {
+            my $path = trim `flatpak info -l $ref`;
+            run 'tree', $path;
+        }
     }
 }
 
