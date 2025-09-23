@@ -3,9 +3,11 @@ use v5.36;
 use threads;
 use Env 'HOME', 'PATH';
 use POSIX 'floor', 'ceil', 'SIGINT';
+use IPC::System::Simple 'system', 'capture';
 use Getopt::Long;
 use Term::ANSIColor;
 use File::Basename;
+use File::Which;
 use List::Util 'first', 'max';
 use String::Util 'trim';
 
@@ -25,14 +27,8 @@ sub die_not_applicable { die_err_sub "source(s)", src_str, "not applicable" }
 sub die_not_exclusive  { die_err_sub "multiple sources", src_str, "specified" }
 sub die_no_pkgs        { die_err_sub "no packages specified" }
 
-sub which($bin) {
-  first { -x "$_/$bin" } (split ":", $PATH);
-}
 sub first_of($desc, @cmds) {
   first { defined which $_ } @cmds or die_err "no $desc found";
-}
-sub run(@args) {
-  exit $? if system(@args) != 0;
 }
 
 my $AUR_HELPER = first_of "AUR helpers", 'yay', 'paru', 'pacman';
@@ -40,7 +36,7 @@ my $SUDO = first_of "sudo utilities", 'sudo', 'doas', 'pkexec';
 
 sub title($fmt, @args) {
   my $str = sprintf $fmt, @args;
-  my $len = (`tput cols` - length($str) - 2) / 2;
+  my $len = (capture('tput', 'cols') - length($str) - 2) / 2;
   my ($s1, $s2) = map {
     my $sep_len = max(1, $_->($len)) - 1;
     colored '⎼' x $sep_len, "dark white"
@@ -171,12 +167,12 @@ sub subcmd_info(@pkgs) {
   src_handle native => sub {
     title "Querying information on native package(s) %s...", pkgs_str;
     my $query = $OPT{remote} ? "-Sii" : "-Qii";
-    run $AUR_HELPER, $query, @pkgs;
+    system $AUR_HELPER, $query, @pkgs;
   }, flatpak => sub {
     title "Querying information on flatpak package(s) %s...", pkgs_str;
     for my $ref (FlatpakList->new_list(@pkgs)->refs) {
       subtitle "Querying information for $ref...";
-      run "flatpak", "info", $ref;
+      system "flatpak", "info", $ref;
     };
   }
 }
@@ -186,15 +182,15 @@ sub subcmd_files(@pkgs) {
   src_handle native => sub {
     title "Querying installed files of native package(s) %s...", pkgs_str;
     if ($OPT{remote}) {
-      run 'pkgfile', '--list', @pkgs;
+      system 'pkgfile', '--list', @pkgs;
     } else {
-      run $AUR_HELPER, '-Ql', @pkgs;
+      system $AUR_HELPER, '-Ql', @pkgs;
     }
   }, flatpak => sub {
     title "Querying installed files of Flatpak package(s) %s...", pkgs_str;
     for my $ref (FlatpakList->new_list(@pkgs)->refs) {
-      my $path = trim `flatpak info -l $ref`;
-      run 'tree', $path;
+      my $path = trim capture 'flatpak', 'info', '-l', $ref;
+      system 'tree', $path;
     }
   }
 }
@@ -204,35 +200,35 @@ sub subcmd_clean {
   src_handle native => sub {
     title 'Cleaning native packages...';
     subtitle 'Removing unneeded packages...';
-    if (my @pkgs = split '\n', `$AUR_HELPER -Qdtq`) {
-      run $AUR_HELPER, "-Rscn", @pkgs, flag_yes_native;
+    if (my @pkgs = split '\n', capture($AUR_HELPER, '-Qdtq')) {
+      system $AUR_HELPER, "-Rscn", @pkgs, flag_yes_native;
     } else {
       say "Nothing unused to uninstall";
     }
     if (my @downloads = grep { -d $_ } glob '/var/cache/pacman/pkg/download*') {
       subtitle "Removing pacman download remains...";
-      run $SUDO, 'rm', '-r', $_ for @downloads;
+      system $SUDO, 'rm', '-r', $_ for @downloads;
     }
     subtitle 'Cleaning cache...';
-    run "yes | $AUR_HELPER -Sccd";
+    system "yes | $AUR_HELPER -Sccd";
   }, flatpak => sub {
     title 'Cleaning flatpak packages...';
     my @flags = ("--unused", "--delete-data", flag_yes_flatpak);
-    run "flatpak", "uninstall", @flags;
+    system "flatpak", "uninstall", @flags;
   }
 }
 
 sub github_search($topic, @pkgs) {
   my $gh = first_of "GitHub CLI", "gh";
   $ENV{GH_PAGER} = '';
-  run $gh, "search", "repos", "--topic=$topic", @pkgs;
+  system $gh, "search", "repos", "--topic=$topic", @pkgs;
 }
 
 sub subcmd_search(@pkgs) {
   src_req defaults => ["native", "flatpak"], pkgs => 1;
   src_handle native => sub {
     title "Searching native package(s) %s...", pkgs_str;
-    run $AUR_HELPER, "-Ss", @pkgs;
+    system $AUR_HELPER, "-Ss", @pkgs;
   }, flatpak => sub {
     title "Searching Flatpak package(s) %s...", pkgs_str;
     FlatpakList->new_search(@pkgs)->print;
@@ -249,10 +245,10 @@ sub subcmd_install(@pkgs) {
   src_req defaults => ["native"], exclusive => 1, pkgs => 1;
   src_handle native => sub {
     title "Installing native package(s) %s...", pkgs_str;
-    run $AUR_HELPER, "-S", @pkgs, flag_yes_native, flag_force_native;
+    system $AUR_HELPER, "-S", @pkgs, flag_yes_native, flag_force_native;
   }, flatpak => sub {
     title "Installing flatpak package(s) %s...", pkgs_str;
-    run "flatpak", "install", @pkgs, flag_yes_flatpak, flag_force_flatpak;
+    system "flatpak", "install", @pkgs, flag_yes_flatpak, flag_force_flatpak;
   }
 }
 
@@ -260,10 +256,10 @@ sub subcmd_remove(@pkgs) {
   src_req defaults => ["native"], exclusive => 1, pkgs => 1;
   src_handle native => sub {
     title "Removing native package(s) %s...", pkgs_str;
-    run $AUR_HELPER, "-Rscn", @pkgs;
+    system $AUR_HELPER, "-Rscn", @pkgs;
   }, flatpak => sub {
     title "Removing Flatpak package(s) %s...", pkgs_str;
-    run "flatpak", "uninstall", "--delete-data", @pkgs;
+    system "flatpak", "uninstall", "--delete-data", @pkgs;
   }
 }
 
@@ -271,7 +267,7 @@ sub subcmd_list(@pkgs) {
   src_req defaults => ["native", "flatpak"];
   src_handle native => sub {
     title "Listing native package(s) %s...", pkgs_str;
-    run $AUR_HELPER, "-Qs", @pkgs;
+    system $AUR_HELPER, "-Qs", @pkgs;
   }, flatpak => sub {
     title "Listing Flatpak package(s) %s...", pkgs_str;
     FlatpakList->new_list(@pkgs)->print;
@@ -283,7 +279,7 @@ sub subcmd_which(@pkgs) {
   src_handle native => sub {
     title "Querying which package provides %s...", pkgs_str;
     my @cmd = $OPT{remote} ? ("pkgfile", "-v") : ($AUR_HELPER, "-Qo");
-    run @cmd, @pkgs;
+    system @cmd, @pkgs;
   }
 }
 
@@ -292,31 +288,31 @@ sub subcmd_update(@pkgs) {
   src_handle native => sub {
     title "Updating native plugin(s) %s...", pkgs_str;
     my @flags = @pkgs ? ("-S", "--needed", @pkgs) : ("-Syu", "--devel");
-    run $AUR_HELPER, @flags, flag_yes_native;
-    run $SUDO, "pkgfile", "-u";
+    system $AUR_HELPER, @flags, flag_yes_native;
+    system $SUDO, "pkgfile", "-u";
   }, flatpak => sub {
     title "Updating Flatpak plugin(s) %s...", pkgs_str;
-    run "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
+    system "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
   }, zsh => sub {
     return if not defined which 'zsh';
     if (-d "$HOME/.zplug") {
       title "Updating ZPlug plugins...";
-      run "zsh", "-ic", "zplug update";
+      system "zsh", "-ic", "zplug update";
     } elsif (-d (my $omz_path = "$HOME/.oh-my-zsh")) {
       title "Updating Oh-My-Zsh plugins...";
-      run "zsh", "-c", "$omz_path/tools/upgrade.sh";
+      system "zsh", "-c", "$omz_path/tools/upgrade.sh";
       my $custom = "$omz_path/custom";
       for (glob("$custom/plugins/*"), glob("$custom/themes/*")) {
         next unless -d "$_/.git";
         subtitle "Updating plugin %s...", basename $_;
-        threads->create(sub { run "cd $_; git pull" });
+        threads->create(sub { system "cd $_; git pull" });
       }
       $_->join for threads->list;
     }
   }, vim => sub {
     return if not defined which 'nvim';
     title "Updating Vim plugins...";
-    run "nvim", "+Lazy! sync", "+qa", "--headless";
+    system "nvim", "+Lazy! sync", "+qa", "--headless";
     say "Done."
   }
 }
