@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use v5.36;
 use threads;
-use Env 'HOME', 'PATH';
+use Env 'HOME';
 use POSIX 'floor', 'ceil', 'SIGINT';
 use IPC::System::Simple 'system', 'capture';
 use Getopt::Long;
