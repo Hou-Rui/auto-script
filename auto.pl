@@ -200,9 +200,11 @@ sub subcmd_clean {
   src_handle native => sub {
     title 'Cleaning native packages...';
     subtitle 'Removing unneeded packages...';
-    if (my @pkgs = split '\n', capture($AUR_HELPER, '-Qdtq')) {
+    eval {
+      my @pkgs = split '\n', capture($AUR_HELPER, '-Qdtq');
       system $AUR_HELPER, "-Rscn", @pkgs, flag_yes_native;
-    } else {
+    };
+    if ($@) {
       say "Nothing unused to uninstall";
     }
     if (my @downloads = grep { -d $_ } glob '/var/cache/pacman/pkg/download*') {
