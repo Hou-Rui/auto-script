@@ -329,6 +329,13 @@ GetOptions src_options,
   "h|help"   => \&subcmd_help
   or die_err "failed to parse options";
 
-my $handler = "subcmd_$SUBCMD";
-die_unknown_subcmd if not exists &$handler;
-(\&$handler)->(@ARGV);
+eval {
+  my $handler = "subcmd_$SUBCMD";
+  die_unknown_subcmd if not exists &$handler;
+  (\&$handler)->(@ARGV);
+};
+
+if ($@) {
+  my $err = colored "error:", "bold red";
+  die "$err $@";
+}
