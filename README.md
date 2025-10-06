@@ -35,6 +35,7 @@ Available options:
   -f, --flatpak:    apply operation on flatpak packages
   -v, --vim:        apply operation on vim packages
   -z, --zsh:        apply operation on zsh packages
+  -e, --exclude:    exclude a specific source
   -y, --yes:        skip all confirmation
   -w, --remote:     (only for info and which) display or query remote info
   -x, --force:      (only for install) force options

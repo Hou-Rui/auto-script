@@ -11,7 +11,7 @@ use File::Which;
 use List::Util 'first', 'max';
 use String::Util 'trim';
 
-my (%SRC, %OPT);
+my (%SRC, %OPT, @EXCLUDED_SRC);
 my @ALL_SRC = ('native', 'flatpak', 'zsh', 'vim');
 my $SUBCMD = shift;
 
@@ -26,6 +26,7 @@ sub die_unknown_subcmd { die_err "unknown subcommand '$SUBCMD'" }
 sub die_not_applicable { die_err_sub "source(s)", src_str, "not applicable" }
 sub die_not_exclusive  { die_err_sub "multiple sources", src_str, "specified" }
 sub die_no_pkgs        { die_err_sub "no packages specified" }
+sub die_unknown_src    { die_err_sub "unknown source @_" }
 
 sub first_of($desc, @cmds) {
   first { defined which $_ } @cmds or die_err "no $desc found";
@@ -64,11 +65,18 @@ sub src_req(%req) {
   @ARGV or die_no_pkgs if $req{pkgs};
 }
 
+sub src_exclude($, @args) {
+  for my $src (@args) {
+    die_unknown_src $src if not grep { $_ eq $src } @ALL_SRC;
+    push @EXCLUDED_SRC, $src;
+  }
+}
+
 sub src_handle(%handlers) {
   for my $src (@ALL_SRC) {
     next if not defined $SRC{$src};
     die_not_applicable if not defined $handlers{$src};
-    $handlers{$src}->(@ARGV);
+    $handlers{$src}->(@ARGV) if not grep { $_ eq $src } @EXCLUDED_SRC;
     delete $SRC{$src};
   }
   src_count == 0 or die_not_applicable;
@@ -99,6 +107,7 @@ sub subcmd_help($exit_code = 0) {
     -f, --flatpak:    apply operation on flatpak packages
     -v, --vim:        apply operation on vim packages
     -z, --zsh:        apply operation on zsh packages
+    -e, --exclude:    exclude a specific source
     -y, --yes:        skip all confirmation
     -w, --remote:     (only for info and which) display or query remote info
     -x, --force:      (only for install) force options
@@ -324,9 +333,10 @@ subcmd_help if $SUBCMD eq '-h' or $SUBCMD eq '--help';
 Getopt::Long::Configure "gnu_getopt";
 GetOptions src_options,
   "w|remote" => \$OPT{remote},
-  "x|force"  => \$OPT{force},
-  "y|yes"    => \$OPT{yes},
-  "h|help"   => \&subcmd_help
+  "x|force" => \$OPT{force},
+  "y|yes" => \$OPT{yes},
+  "e|exclude=s@" => \&src_exclude,
+  "h|help" => \&subcmd_help
   or die_err "failed to parse options";
 
 eval {
