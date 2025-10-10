@@ -1,3 +1,5 @@
+# kate: syntax perl
+
 requires 'String::Util';
 requires 'IPC::System::Simple';
 requires 'File::Which';
