@@ -347,5 +347,6 @@ eval {
 
 if ($@) {
   my $err = colored "error:", "bold red";
-  die "$err $@";
+  $@ =~ s/\s+at\s+\S+\s+line\s+\d+\.?\n?$//;
+  die "$err $@\n";
 }
