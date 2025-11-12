@@ -176,7 +176,14 @@ sub subcmd_info(@pkgs) {
   src_handle native => sub {
     title "Querying information on native package(s) %s...", pkgs_str;
     my $query = $OPT{remote} ? "-Sii" : "-Qii";
-    system $AUR_HELPER, $query, @pkgs;
+    my $remote = $OPT{remote} ? "remote" : "local";
+    eval {
+      system $AUR_HELPER, $query, @pkgs;
+    };
+    if ($@) {
+      my $pkgs = pkgs_str;
+      die_err "no information found for $remote package(s) $pkgs";
+    }
   }, flatpak => sub {
     title "Querying information on flatpak package(s) %s...", pkgs_str;
     for my $ref (FlatpakList->new_list(@pkgs)->refs) {
