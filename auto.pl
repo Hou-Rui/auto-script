@@ -19,8 +19,8 @@ sub pkgs_str           { join ", ", @ARGV }
 sub src_str            { join ", ", grep {$SRC{$_}} @ALL_SRC }
 sub src_count          { scalar grep {defined $_} values %SRC }
 
-sub die_err            { die "error: @_.\ntype 'auto help' to see usage.\n" }
-sub die_err_sub        { die "error in $SUBCMD: @_.\ntype 'auto help' to see usage.\n" }
+sub die_err            { die "@_.\ntype 'auto help' to see usage.\n" }
+sub die_err_sub        { die "in $SUBCMD: @_.\ntype 'auto help' to see usage.\n" }
 sub die_no_subcmd      { die_err "missing subcommand" }
 sub die_unknown_subcmd { die_err "unknown subcommand '$SUBCMD'" }
 sub die_not_applicable { die_err_sub "source(s)", src_str, "not applicable" }
@@ -159,6 +159,7 @@ package FlatpakList {
   }
   sub refs($self) { map {$_->{ref}} @$self }
   sub print($self) {
+    die if @$self == 0;
     for my $f (@$self) {
       my $remote_str = $f->{remotes} // $f->{origin};
       my $remote = colored $remote_str, "bold blue";
@@ -174,16 +175,12 @@ package FlatpakList {
 sub subcmd_info(@pkgs) {
   src_req defaults => ["native"], exclusive => 1, pkgs => 1;
   src_handle native => sub {
-    title "Querying information on native package(s) %s...", pkgs_str;
+    my $pkgs = pkgs_str;
+    title "Querying information on native package(s) $pkgs...";
     my $query = $OPT{remote} ? "-Sii" : "-Qii";
     my $remote = $OPT{remote} ? "remote" : "local";
-    eval {
-      system $AUR_HELPER, $query, @pkgs;
-    };
-    if ($@) {
-      my $pkgs = pkgs_str;
-      die_err "no information found for $remote package(s) $pkgs";
-    }
+    eval { system $AUR_HELPER, $query, @pkgs };
+    die_err "no information found for $remote package(s) $pkgs" if $@;
   }, flatpak => sub {
     title "Querying information on flatpak package(s) %s...", pkgs_str;
     for my $ref (FlatpakList->new_list(@pkgs)->refs) {
@@ -284,11 +281,15 @@ sub subcmd_remove(@pkgs) {
 sub subcmd_list(@pkgs) {
   src_req defaults => ["native", "flatpak"];
   src_handle native => sub {
-    title "Listing native package(s) %s...", pkgs_str;
-    system $AUR_HELPER, "-Qs", @pkgs;
+    my $pkgs = pkgs_str;
+    title "Listing native package(s) $pkgs...";
+    eval { system $AUR_HELPER, "-Qs", @pkgs };
+    die_err "No native packages found with keyword $pkgs" if $@;
   }, flatpak => sub {
-    title "Listing Flatpak package(s) %s...", pkgs_str;
-    FlatpakList->new_list(@pkgs)->print;
+    my $pkgs = pkgs_str;
+    title "Listing Flatpak package(s) $pkgs...";
+    eval { FlatpakList->new_list(@pkgs)->print };
+    die_err "No Flatpak packages found with keyword $pkgs" if $@;
   }
 }
 
