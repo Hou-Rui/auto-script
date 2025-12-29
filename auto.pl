@@ -182,18 +182,23 @@ sub subcmd_info(@pkgs) {
     eval { system $AUR_HELPER, $query, @pkgs };
     die_err "no information found for $remote package(s) $pkgs" if $@;
   }, flatpak => sub {
-    title "Querying information on flatpak package(s) %s...", pkgs_str;
+    my $pkgs = pkgs_str;
+    my $remote = $OPT{remote} ? "remote" : "local";
+    title "Querying information on $remote Flatpak package(s) $pkgs...";
+    my $pkglist = [];
     if ($OPT{remote}) {
-      my $pkglist = FlatpakList->new_search(@pkgs);
-      for my $pkg (@$pkglist) {
-        my $appid = $pkg->{application};
-        subtitle "Querying remote information for %s...", $appid;
-        system "flatpak", "remote-info", $pkg->{remotes}, $appid;
-      }
+      $pkglist = FlatpakList->new_search(@pkgs)->reversed;
     } else {
-      for my $ref (FlatpakList->new_list(@pkgs)->refs) {
-        subtitle "Querying information for $ref...";
-        system "flatpak", "info", $ref;
+      $pkglist = FlatpakList->new_list(@pkgs);
+    }
+    die_err "No information found for $remote Flatpak package $pkgs" if not @$pkglist;
+    for my $pkg (@$pkglist) {
+      my $appid = $pkg->{application};
+      subtitle "Querying $remote information for %s...", $appid;
+      if ($OPT{remote}) {
+        system "flatpak", "remote-info", $pkg->{remotes}, $appid;
+      } else {
+        system "flatpak", "info", $appid;
       }
     }
   }
