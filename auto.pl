@@ -132,6 +132,7 @@ package FlatpakPkg {
 package FlatpakList {
   use Term::ANSIColor;
   use Scalar::Util 'blessed';
+
   sub new($class, $cmds, $cols, @pkgs) {
     my $self = [];
     $cols = ['name', 'description', 'application', 'version', 'branch', @$cols];
@@ -147,19 +148,26 @@ package FlatpakList {
     close $out;
     bless $self, $class;
   }
+
   sub reversed($self) {
     my @result = reverse @$self;
     bless \@result, blessed($self);
   }
+
   sub new_list($class, @pkgs) {
     new $class, ['list'], ['origin', 'ref'], @pkgs;
   }
+
   sub new_search($class, @pkgs) {
     new($class, ['search', @pkgs], ['remotes'])->reversed;
   }
-  sub refs($self) { map {$_->{ref}} @$self }
+
+  sub refs($self) {
+    map {$_->{ref}} @$self
+  }
+
   sub print($self) {
-    die if @$self == 0;
+    # die if @$self == 0;
     for my $f (@$self) {
       my $remote_str = $f->{remotes} // $f->{origin};
       my $remote = colored $remote_str, "bold blue";
@@ -260,7 +268,7 @@ sub subcmd_search(@pkgs) {
     system $AUR_HELPER, "-Ss", @pkgs;
   }, flatpak => sub {
     title "Searching Flatpak package(s) %s...", pkgs_str;
-    FlatpakList->new_search(@pkgs)->print;
+    eval { FlatpakList->new_search(@pkgs)->print };
   }, vim => sub {
     title "Searching Vim plugins(s) %s...", pkgs_str;
     github_search "neovim,nvim,vim", @pkgs;
