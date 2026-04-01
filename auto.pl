@@ -349,6 +349,14 @@ sub subcmd_update(@pkgs) {
         threads->create(sub { system "cd $_; git pull" });
       }
       $_->join for threads->list;
+    } elsif (-d (my $plugin_path = $ENV{ZPLUGINDIR})) {
+      title "Updating ZSH plugins...";
+      for (glob("$plugin_path/*")) {
+        next unless -d "$_/.git";
+        subtitle "Updating plugin %s...", basename $_;
+        threads->create(sub { system "cd $_; git pull" });
+      }
+      $_->join for threads->list;
     }
   }, vim => sub {
     return if not defined which 'nvim';
