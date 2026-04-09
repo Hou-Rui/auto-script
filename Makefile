@@ -1,18 +1,13 @@
 .PHONY: all deps clean
 
-PERL          := perl
-LOCAL_LIB     := $(CURDIR)/local
-CPANM         := $(LOCAL_LIB)/bin/cpanm
-FATPACK       := $(LOCAL_LIB)/bin/fatpack
+PERL       := perl
+LOCAL_LIB  := $(CURDIR)/local
+CPANM      := $(LOCAL_LIB)/bin/cpanm
+FATPACK    := $(LOCAL_LIB)/bin/fatpack
 
-APP_PL        := auto.pl
-APP_EXE       := build/auto
-APP_COMP      := zsh-auto-script
-
-TARGET_PREFIX := $(HOME)/.local
-TARGET_EXE    := $(TARGET_PREFIX)/bin/auto
-TARGET_CUSTOM := $(TARGET_PREFIX)/share/zshcustom
-TARGET_COMP   := $(TARGET_CUSTOM)/zsh-auto-script
+APP_PL     := auto.pl
+APP_EXE    := build/auto
+TARGET_EXE := $(HOME)/.local/bin/auto
 
 export PERL5LIB=$(LOCAL_LIB)/lib/perl5
 export PERL_LOCAL_LIB_ROOT=$(LOCAL_LIB)
@@ -37,9 +32,6 @@ build: $(APP_EXE)
 
 install: $(APP_EXE)
 	install -m755 $(APP_EXE) $(TARGET_EXE)
-	mkdir -p $(TARGET_CUSTOM)
-	rm -rf $(TARGET_COMP)
-	cp -r $(APP_COMP) $(TARGET_COMP)
 
 clean:
 	rm -rf build local fatlib
