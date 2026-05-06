@@ -325,32 +325,33 @@ sub subcmd_which(@pkgs) {
   }
 }
 
-sub subcmd_update(@pkgs) {
-  src_req defaults => (@pkgs ? ["native"] : \@ALL_SRC);
-  src_handle native => sub {
-    title "Updating native plugin(s) %s...", pkgs_str;
-    my @flags = @pkgs ? ("-S", "--needed", @pkgs) : ("-Syu", "--devel");
-    system $AUR_HELPER, @flags, flag_yes_native;
-    system $SUDO, "pkgfile", "-u";
-  }, flatpak => sub {
-    title "Updating Flatpak plugin(s) %s...", pkgs_str;
-    system "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
-  }, zsh => sub {
-    return if not defined which 'zsh';
-    if (-d "$HOME/.zplug") {
-      title "Updating ZPlug plugins...";
-      system "zsh", "-ic", "zplug update";
-    } elsif (-d (my $omz_path = "$HOME/.oh-my-zsh")) {
-      title "Updating Oh-My-Zsh plugins...";
-      system "zsh", "-c", "$omz_path/tools/upgrade.sh";
-      my $custom = "$omz_path/custom";
-      for (glob("$custom/plugins/*"), glob("$custom/themes/*")) {
-        next unless -d "$_/.git";
-        subtitle "Updating plugin %s...", basename $_;
-        threads->create(sub { system "cd $_; git pull" });
-      }
-      $_->join for threads->list;
-    } elsif (-d (my $plugin_path = $ENV{ZPLUGINDIR})) {
+sub update_keyring_pkgs() {
+  my @needed_pkgs = ();
+  for ("archlinux", "manjaro", "chaotic", "archlinuxcn") {
+    my $pkg = "$_-keyring";
+    next if not my @p = glob "/var/lib/pacman/local/$pkg*";
+    eval { system "pacman", "-Qu", $pkg };
+    next if $@;
+    push @needed_pkgs, $pkg;
+  }
+  system $AUR_HELPER, "-S", "--needed", @needed_pkgs;
+}
+
+sub update_zsh_plugins() {
+  if (-d "$HOME/.zplug") {
+    title "Updating ZPlug plugins...";
+    system "zsh", "-ic", "zplug update";
+  } elsif (-d (my $omz_path = "$HOME/.oh-my-zsh")) {
+    title "Updating Oh-My-Zsh plugins...";
+    system "zsh", "-c", "$omz_path/tools/upgrade.sh";
+    my $custom = "$omz_path/custom";
+    for (glob("$custom/plugins/*"), glob("$custom/themes/*")) {
+      next unless -d "$_/.git";
+      subtitle "Updating plugin %s...", basename $_;
+      threads->create(sub { system "cd $_; git pull" });
+    }
+    $_->join for threads->list;
+  } elsif (-d (my $plugin_path = $ENV{ZPLUGINDIR})) {
       title "Updating ZSH plugins...";
       for (glob("$plugin_path/*")) {
         next unless -d "$_/.git";
@@ -359,6 +360,22 @@ sub subcmd_update(@pkgs) {
       }
       $_->join for threads->list;
     }
+}
+
+sub subcmd_update(@pkgs) {
+  src_req defaults => (@pkgs ? ["native"] : \@ALL_SRC);
+  src_handle native => sub {
+    title "Updating native plugin(s) %s...", pkgs_str;
+    update_keyring_pkgs;
+    my @flags = @pkgs ? ("-S", "--needed", @pkgs) : ("-Syu", "--devel");
+    system $AUR_HELPER, @flags, flag_yes_native;
+    system $SUDO, "pkgfile", "-u";
+  }, flatpak => sub {
+    title "Updating Flatpak plugin(s) %s...", pkgs_str;
+    system "flatpak", "update", flag_yes_flatpak, FlatpakList->new_list(@pkgs)->refs;
+  }, zsh => sub {
+    return if not defined which 'zsh';
+    update_zsh_plugins;
   }, vim => sub {
     return if not defined which 'nvim';
     title "Updating Vim plugins...";
