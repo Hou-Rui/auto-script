@@ -84,7 +84,7 @@ sub src_handle(%handlers) {
 
 sub flag_yes_native    { $OPT{yes} ? ("--noconfirm") : () }
 sub flag_yes_flatpak   { $OPT{yes} ? ("--assumeyes") : () }
-sub flag_force_native  { $OPT{force} ? ("--overwrite") : () }
+sub flag_force_native  { $OPT{force} ? ("--overwrite", '*') : () }
 sub flag_force_flatpak { $OPT{force} ? ("--reinstall") : () }
 
 sub subcmd_help($exit_code = 0) {
@@ -248,6 +248,7 @@ sub subcmd_clean {
     }
     subtitle 'Cleaning cache...';
     system "yes | $AUR_HELPER -Sccd";
+    say "\nDone cleaning.";
   }, flatpak => sub {
     title 'Cleaning flatpak packages...';
     my @flags = ("--unused", "--delete-data", flag_yes_flatpak);
