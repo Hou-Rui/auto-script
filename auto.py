@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
+import abc
 import sys
 import os
 import re
@@ -8,185 +11,221 @@ import math
 import shutil
 import subprocess
 import threading
+import argparse
+from collections.abc import Callable
+from dataclasses import dataclass
 from os.path import basename
+from typing import ClassVar, NoReturn
 
-OPT = {}
-SUBCMD = None
-ARGS = []
-AUR_HELPER = None
-SUDO = None
+
+@dataclass
+class Options:
+    yes: bool = False
+    force: bool = False
+    remote: bool = False
+
+    def flag_yes_native(self) -> list[str]:
+        return ["--noconfirm"] if self.yes else []
+
+    def flag_yes_flatpak(self) -> list[str]:
+        return ["--assumeyes"] if self.yes else []
+
+    def flag_force_native(self) -> list[str]:
+        return ["--overwrite", "*"] if self.force else []
+
+    def flag_force_flatpak(self) -> list[str]:
+        return ["--reinstall"] if self.force else []
+
+
+OPT = Options()
+ARGS: list[str] = []
+AUR_HELPER: str
+SUDO: str
 
 
 class AutoError(Exception):
     _HINT = "type 'auto help' to see usage."
-    def __str__(self):
+
+    def __str__(self) -> str:
         return f"{super().__str__()}.\n{self._HINT}"
 
 
 class SubcmdError(AutoError):
     """Error raised within a subcommand context; prefixes the message with the subcommand name."""
-    def __init__(self, msg):
-        Exception.__init__(self, f"in {SUBCMD}: {msg}")
+
+    def __init__(self, subcmd: str, msg: str) -> None:
+        Exception.__init__(self, f"in {subcmd}: {msg}")
 
 
 class Sources:
-    ALL = ('native', 'flatpak', 'zsh', 'vim')
+    ALL = ("native", "flatpak", "zsh", "vim")
 
-    def __init__(self):
-        self._active = set()
-        self._excluded = set()
+    def __init__(self) -> None:
+        self._active: set[str] = set()
+        self._excluded: set[str] = set()
+        self._context: str = ""
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._active)
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return bool(self._active)
 
-    def __str__(self):
-        return ', '.join(s for s in self.ALL if s in self._active)
+    def __str__(self) -> str:
+        return ", ".join(s for s in self.ALL if s in self._active)
 
-    def enable(self, src):
+    def set_context(self, name: str) -> None:
+        self._context = name
+
+    def _error(self, msg: str) -> SubcmdError:
+        return SubcmdError(self._context, msg)
+
+    def enable(self, src: str) -> None:
         self._active.add(src)
 
-    def exclude(self, src):
+    def exclude(self, src: str) -> None:
         if src not in self.ALL:
-            raise SubcmdError(f"unknown source {src}")
+            raise self._error(f"unknown source {src}")
         self._excluded.add(src)
 
-    def require(self, defaults=None, exclusive=False, pkgs=False):
+    def require(
+        self,
+        defaults: list[str] | None = None,
+        exclusive: bool = False,
+        pkgs: bool = False,
+    ) -> None:
         if not self and defaults:
             self._active = set(defaults)
         if exclusive and len(self) != 1:
-            raise SubcmdError(f"multiple sources {self} specified")
+            raise self._error(f"multiple sources {self} specified")
         if pkgs and not ARGS:
-            raise SubcmdError("no packages specified")
+            raise self._error("no packages specified")
 
-    def handle(self, **handlers):
+    def handle(self, **handlers: Callable[[list[str]], None]) -> None:
         for src in self.ALL:
             if src not in self._active:
                 continue
             if src not in handlers:
-                raise SubcmdError(f"source(s) {self} not applicable")
+                raise self._error(f"source(s) {self} not applicable")
             if src not in self._excluded:
-                handlers[src](*ARGS)
+                handlers[src](ARGS)
             self._active.discard(src)
         if self._active:
-            raise SubcmdError(f"source(s) {self} not applicable")
+            raise self._error(f"source(s) {self} not applicable")
 
 
 SOURCES = Sources()
 
 
-def run(*args):
+def run(*args: str) -> None:
     result = subprocess.run(list(args))
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, list(args))
 
 
-def capture(*args):
+def capture(*args: str) -> str:
     return subprocess.run(list(args), capture_output=True, text=True, check=True).stdout
 
 
-def pkgs_str():
-    return ', '.join(ARGS)
+def pkgs_str() -> str:
+    return ", ".join(ARGS)
 
 
-
-def first_of(desc, *cmds):
+def first_of(desc: str, *cmds: str) -> str:
     for cmd in cmds:
         if shutil.which(cmd):
             return cmd
     raise AutoError(f"no {desc} found")
 
 
-def colored(text, style):
+def colored(text: str, style: str) -> str:
     codes = {
-        'bold':       '\033[1m',
-        'bold blue':  '\033[1;34m',
-        'bold green': '\033[1;32m',
-        'bold red':   '\033[1;31m',
-        'cyan':       '\033[36m',
-        'dark white': '\033[2;37m',
+        "bold": "\033[1m",
+        "bold blue": "\033[1;34m",
+        "bold green": "\033[1;32m",
+        "bold red": "\033[1;31m",
+        "cyan": "\033[36m",
+        "dark white": "\033[2;37m",
     }
     return f"{codes.get(style, '')}{text}\033[0m"
 
 
-def title(fmt, *args):
+def title(fmt: str, *args: object) -> None:
     text = fmt % args if args else fmt
     cols = shutil.get_terminal_size().columns
     pad = (cols - len(text) - 2) / 2
-    s1 = colored('⎼' * max(0, max(1, math.floor(pad)) - 1), 'dark white')
-    s2 = colored('⎼' * max(0, max(1, math.ceil(pad)) - 1), 'dark white')
+    s1 = colored("⎼" * max(0, max(1, math.floor(pad)) - 1), "dark white")
+    s2 = colored("⎼" * max(0, max(1, math.ceil(pad)) - 1), "dark white")
     print(f" {s1} {colored(text, 'bold')} {s2} ")
 
 
-def subtitle(fmt, *args):
+def subtitle(fmt: str, *args: object) -> None:
     text = fmt % args if args else fmt
     print(colored(":: ", "bold blue") + colored(text, "bold"))
 
 
-def flag_yes_native():    return ['--noconfirm'] if OPT.get('yes') else []
-def flag_yes_flatpak():   return ['--assumeyes'] if OPT.get('yes') else []
-def flag_force_native():  return ['--overwrite', '*'] if OPT.get('force') else []
-def flag_force_flatpak(): return ['--reinstall'] if OPT.get('force') else []
-
-
 class FlatpakPkg:
-    def __init__(self, cols, values):
+    def __init__(self, cols: list[str], values: list[str]) -> None:
         self._data = dict(zip(cols, values))
 
-    def __getitem__(self, key):
-        return self._data.get(key, '')
+    def __getitem__(self, key: str) -> str:
+        return self._data.get(key, "")
 
-    def match(self, *pkgs):
+    def match(self, *pkgs: str) -> bool:
         for pkg in pkgs:
             pattern = re.compile(pkg, re.IGNORECASE)
-            for key in ('name', 'application', 'description'):
-                if pattern.search(self._data.get(key, '')):
+            for key in ("name", "application", "description"):
+                if pattern.search(self._data.get(key, "")):
                     return True
         return False
 
 
 class FlatpakList:
-    def __init__(self, items=None):
+    def __init__(self, items: list[FlatpakPkg] | None = None) -> None:
         self.items = items if items is not None else []
 
     @classmethod
-    def _build(cls, cmds, extra_cols, filter_pkgs):
-        cols = ['name', 'description', 'application', 'version', 'branch'] + extra_cols
+    def _build(
+        cls, cmds: list[str], extra_cols: list[str], filter_pkgs: list[str]
+    ) -> FlatpakList:
+        cols = ["name", "description", "application", "version", "branch"] + extra_cols
         proc = subprocess.Popen(
-            ['flatpak'] + cmds + [f"--columns={','.join(cols)}"],
-            stdout=subprocess.PIPE, text=True
+            ["flatpak"] + cmds + [f"--columns={','.join(cols)}"],
+            stdout=subprocess.PIPE,
+            text=True,
         )
+        if proc.stdout is None:
+            proc.wait()
+            return cls()
         result = cls()
         for line in proc.stdout:
-            line = line.rstrip('\n')
+            line = line.rstrip("\n")
             if line == "No matches found":
                 break
-            pkg = FlatpakPkg(cols, line.split('\t'))
+            pkg = FlatpakPkg(cols, line.split("\t"))
             if filter_pkgs and not pkg.match(*filter_pkgs):
                 continue
             result.items.append(pkg)
         proc.wait()
         return result
 
-    def reversed(self):
+    def reversed(self) -> FlatpakList:
         return FlatpakList(list(reversed(self.items)))
 
     @classmethod
-    def new_list(cls, *pkgs):
-        return cls._build(['list'], ['origin', 'ref'], list(pkgs))
+    def new_list(cls, *pkgs: str) -> FlatpakList:
+        return cls._build(["list"], ["origin", "ref"], list(pkgs))
 
     @classmethod
-    def new_search(cls, *pkgs):
-        return cls._build(['search'] + list(pkgs), ['remotes'], []).reversed()
+    def new_search(cls, *pkgs: str) -> FlatpakList:
+        return cls._build(["search"] + list(pkgs), ["remotes"], []).reversed()
 
-    def refs(self):
-        return [item['ref'] for item in self.items]
+    def refs(self) -> list[str]:
+        return [item["ref"] for item in self.items]
 
-    def print(self):
+    def print(self) -> None:
         for f in self.items:
-            remote_str = f['remotes'] or f['origin']
+            remote_str = f["remotes"] or f["origin"]
             print(
                 f"{colored(remote_str, 'bold blue')}/{colored(f['application'], 'bold')} "
                 f"{colored(f['branch'], 'bold green')} {colored(f['version'], 'cyan')}"
@@ -194,8 +233,87 @@ class FlatpakList:
             print(f"    {f['name']}: {f['description']}")
 
 
-def subcmd_help(exit_code=0):
-    print("""Usage: auto <command> [options] [packages]
+def github_search(topic: str, *pkgs: str) -> None:
+    gh = first_of("GitHub CLI", "gh")
+    env = os.environ.copy()
+    env["GH_PAGER"] = ""
+    subprocess.run([gh, "search", "repos", f"--topic={topic}", *pkgs], env=env)
+
+
+def update_keyring_pkgs() -> None:
+    needed_pkgs = []
+    for name in ("archlinux", "manjaro", "chaotic", "archlinuxcn"):
+        pkg = f"{name}-keyring"
+        if not glob.glob(f"/var/lib/pacman/local/{pkg}*"):
+            continue
+        try:
+            run("pacman", "-Qu", pkg)
+        except subprocess.CalledProcessError:
+            continue
+        needed_pkgs.append(pkg)
+    run(AUR_HELPER, "-S", "--needed", *needed_pkgs)
+
+
+def _git_pull_parallel(paths: list[str]) -> None:
+    threads: list[threading.Thread] = []
+    for path in paths:
+        if not os.path.isdir(os.path.join(path, ".git")):
+            continue
+        subtitle("Updating plugin %s...", basename(path))
+        t = threading.Thread(
+            target=lambda p=path: subprocess.run(f"cd {p}; git pull", shell=True)
+        )
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+
+
+def update_zsh_plugins() -> None:
+    home = os.environ.get("HOME", "")
+    zplug_path = os.path.join(home, ".zplug")
+    omz_path = os.path.join(home, ".oh-my-zsh")
+    plugin_path = os.environ.get("ZPLUGINDIR", "")
+
+    if os.path.isdir(zplug_path):
+        title("Updating ZPlug plugins...")
+        run("zsh", "-ic", "zplug update")
+    elif os.path.isdir(omz_path):
+        title("Updating Oh-My-Zsh plugins...")
+        run("zsh", "-c", f"{omz_path}/tools/upgrade.sh")
+        custom = os.path.join(omz_path, "custom")
+        paths = glob.glob(f"{custom}/plugins/*") + glob.glob(f"{custom}/themes/*")
+        _git_pull_parallel(paths)
+    elif plugin_path and os.path.isdir(plugin_path):
+        title("Updating ZSH plugins...")
+        _git_pull_parallel(glob.glob(f"{plugin_path}/*"))
+
+
+class Subcommand(abc.ABC):
+    name: ClassVar[str]
+    _registry: ClassVar[dict[str, type[Subcommand]]] = {}
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if hasattr(cls, "name"):
+            Subcommand._registry[cls.name] = cls
+
+    @classmethod
+    def dispatch(cls, name: str) -> Subcommand:
+        subcls = cls._registry.get(name)
+        if subcls is None:
+            raise AutoError(f"unknown subcommand '{name}'")
+        return subcls()
+
+    @abc.abstractmethod
+    def run(self) -> None: ...
+
+
+class HelpCmd(Subcommand):
+    name = "help"
+
+    def run(self) -> NoReturn:
+        print("""Usage: auto <command> [options] [packages]
 
     Available commands:
     install:    install package(s) (default to native)
@@ -220,275 +338,288 @@ def subcmd_help(exit_code=0):
     -x, --force:      (only for install) force options
     -h, --help:       display this message
   """)
-    sys.exit(exit_code)
+        sys.exit(0)
 
 
-def subcmd_info(*pkgs):
-    SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+class InfoCmd(Subcommand):
+    name = "info"
 
-    def handle_native(*pkgs):
-        title("Querying information on native package(s) %s...", pkgs_str())
-        query = "-Sii" if OPT.get('remote') else "-Qii"
-        remote = "remote" if OPT.get('remote') else "local"
-        try:
-            run(AUR_HELPER, query, *pkgs)
-        except subprocess.CalledProcessError:
-            raise AutoError(f"no information found for {remote} package(s) {pkgs_str()}")
+    def run(self) -> None:
+        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
 
-    def handle_flatpak(*pkgs):
-        remote = "remote" if OPT.get('remote') else "local"
-        title("Querying information on %s Flatpak package(s) %s...", remote, pkgs_str())
-        if OPT.get('remote'):
-            pkglist = FlatpakList.new_search(*pkgs).reversed()
-        else:
-            pkglist = FlatpakList.new_list(*pkgs)
-        if not pkglist.items:
-            raise AutoError(f"No information found for {remote} Flatpak package {pkgs_str()}")
-        for pkg in pkglist.items:
-            appid = pkg['application']
-            subtitle("Querying %s information for %s...", remote, appid)
-            if OPT.get('remote'):
-                run("flatpak", "remote-info", pkg['remotes'], appid)
+        def handle_native(pkgs: list[str]) -> None:
+            title("Querying information on native package(s) %s...", pkgs_str())
+            query = "-Sii" if OPT.remote else "-Qii"
+            remote = "remote" if OPT.remote else "local"
+            try:
+                run(AUR_HELPER, query, *pkgs)
+            except subprocess.CalledProcessError:
+                raise AutoError(
+                    f"no information found for {remote} package(s) {pkgs_str()}"
+                )
+
+        def handle_flatpak(pkgs: list[str]) -> None:
+            remote = "remote" if OPT.remote else "local"
+            title(
+                "Querying information on %s Flatpak package(s) %s...",
+                remote,
+                pkgs_str(),
+            )
+            if OPT.remote:
+                pkglist = FlatpakList.new_search(*pkgs).reversed()
             else:
-                run("flatpak", "info", appid)
+                pkglist = FlatpakList.new_list(*pkgs)
+            if not pkglist.items:
+                raise AutoError(
+                    f"No information found for {remote} Flatpak package {pkgs_str()}"
+                )
+            for pkg in pkglist.items:
+                appid = pkg["application"]
+                subtitle("Querying %s information for %s...", remote, appid)
+                if OPT.remote:
+                    run("flatpak", "remote-info", pkg["remotes"], appid)
+                else:
+                    run("flatpak", "info", appid)
 
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
-
-
-def subcmd_files(*pkgs):
-    SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
-
-    def handle_native(*pkgs):
-        title("Querying installed files of native package(s) %s...", pkgs_str())
-        if OPT.get('remote'):
-            run('pkgfile', '--list', *pkgs)
-        else:
-            run(AUR_HELPER, '-Ql', *pkgs)
-
-    def handle_flatpak(*pkgs):
-        title("Querying installed files of Flatpak package(s) %s...", pkgs_str())
-        for ref in FlatpakList.new_list(*pkgs).refs():
-            path = capture('flatpak', 'info', '-l', ref).strip()
-            run('tree', path)
-
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
 
 
-def subcmd_clean(*pkgs):
-    SOURCES.require(defaults=["native", "flatpak"])
+class FilesCmd(Subcommand):
+    name = "files"
 
-    def handle_native(*pkgs):
-        title('Cleaning native packages...')
-        subtitle('Removing unneeded packages...')
-        try:
-            orphans = [p for p in capture(AUR_HELPER, '-Qdtq').split('\n') if p]
-            run(AUR_HELPER, "-Rscn", *orphans, *flag_yes_native())
-        except subprocess.CalledProcessError:
-            print("Nothing unused to uninstall")
-        downloads = [d for d in glob.glob('/var/cache/pacman/pkg/download*') if os.path.isdir(d)]
-        if downloads:
-            subtitle("Removing pacman download remains...")
-            for d in downloads:
-                run(SUDO, 'rm', '-r', d)
-        subtitle('Cleaning cache...')
-        subprocess.run(f"yes | {AUR_HELPER} -Sccd", shell=True)
-        print("\nDone cleaning.")
+    def run(self) -> None:
+        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
 
-    def handle_flatpak(*pkgs):
-        title('Cleaning flatpak packages...')
-        run("flatpak", "uninstall", "--unused", "--delete-data", *flag_yes_flatpak())
+        def handle_native(pkgs: list[str]) -> None:
+            title("Querying installed files of native package(s) %s...", pkgs_str())
+            if OPT.remote:
+                run("pkgfile", "--list", *pkgs)
+            else:
+                run(AUR_HELPER, "-Ql", *pkgs)
 
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        def handle_flatpak(pkgs: list[str]) -> None:
+            title("Querying installed files of Flatpak package(s) %s...", pkgs_str())
+            for ref in FlatpakList.new_list(*pkgs).refs():
+                path = capture("flatpak", "info", "-l", ref).strip()
+                run("tree", path)
+
+        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
 
 
-def github_search(topic, *pkgs):
-    gh = first_of("GitHub CLI", "gh")
-    env = os.environ.copy()
-    env['GH_PAGER'] = ''
-    subprocess.run([gh, "search", "repos", f"--topic={topic}", *pkgs], env=env)
+class CleanCmd(Subcommand):
+    name = "clean"
+
+    def run(self) -> None:
+        SOURCES.require(defaults=["native", "flatpak"])
+
+        def handle_native(_: list[str]) -> None:
+            title("Cleaning native packages...")
+            subtitle("Removing unneeded packages...")
+            try:
+                orphans = [p for p in capture(AUR_HELPER, "-Qdtq").split("\n") if p]
+                run(AUR_HELPER, "-Rscn", *orphans, *OPT.flag_yes_native())
+            except subprocess.CalledProcessError:
+                print("Nothing unused to uninstall")
+            downloads = [
+                d
+                for d in glob.glob("/var/cache/pacman/pkg/download*")
+                if os.path.isdir(d)
+            ]
+            if downloads:
+                subtitle("Removing pacman download remains...")
+                for d in downloads:
+                    run(SUDO, "rm", "-r", d)
+            subtitle("Cleaning cache...")
+            subprocess.run(f"yes | {AUR_HELPER} -Sccd", shell=True)
+            print("\nDone cleaning.")
+
+        def handle_flatpak(_: list[str]) -> None:
+            title("Cleaning flatpak packages...")
+            run(
+                "flatpak",
+                "uninstall",
+                "--unused",
+                "--delete-data",
+                *OPT.flag_yes_flatpak(),
+            )
+
+        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
 
 
-def subcmd_search(*pkgs):
-    SOURCES.require(defaults=["native", "flatpak"], pkgs=True)
+class SearchCmd(Subcommand):
+    name = "search"
 
-    def handle_native(*pkgs):
-        title("Searching native package(s) %s...", pkgs_str())
-        run(AUR_HELPER, "-Ss", *pkgs)
+    def run(self) -> None:
+        SOURCES.require(defaults=["native", "flatpak"], pkgs=True)
 
-    def handle_flatpak(*pkgs):
-        title("Searching Flatpak package(s) %s...", pkgs_str())
-        try:
-            FlatpakList.new_search(*pkgs).print()
-        except Exception:
-            pass
+        def handle_native(pkgs: list[str]) -> None:
+            title("Searching native package(s) %s...", pkgs_str())
+            run(AUR_HELPER, "-Ss", *pkgs)
 
-    def handle_vim(*pkgs):
-        title("Searching Vim plugins(s) %s...", pkgs_str())
-        github_search("neovim,nvim,vim", *pkgs)
+        def handle_flatpak(pkgs: list[str]) -> None:
+            title("Searching Flatpak package(s) %s...", pkgs_str())
+            try:
+                FlatpakList.new_search(*pkgs).print()
+            except Exception:
+                pass
 
-    def handle_zsh(*pkgs):
-        title("Searching Zsh plugins(s) %s...", pkgs_str())
-        github_search("zsh", *pkgs)
+        def handle_vim(pkgs: list[str]) -> None:
+            title("Searching Vim plugins(s) %s...", pkgs_str())
+            github_search("neovim,nvim,vim", *pkgs)
 
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak, vim=handle_vim, zsh=handle_zsh)
+        def handle_zsh(pkgs: list[str]) -> None:
+            title("Searching Zsh plugins(s) %s...", pkgs_str())
+            github_search("zsh", *pkgs)
 
-
-def subcmd_install(*pkgs):
-    SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
-
-    def handle_native(*pkgs):
-        title("Installing native package(s) %s...", pkgs_str())
-        run(AUR_HELPER, "-S", *pkgs, *flag_yes_native(), *flag_force_native())
-
-    def handle_flatpak(*pkgs):
-        title("Installing flatpak package(s) %s...", pkgs_str())
-        run("flatpak", "install", *pkgs, *flag_yes_flatpak(), *flag_force_flatpak())
-
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        SOURCES.handle(
+            native=handle_native, flatpak=handle_flatpak, vim=handle_vim, zsh=handle_zsh
+        )
 
 
-def subcmd_remove(*pkgs):
-    SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+class InstallCmd(Subcommand):
+    name = "install"
 
-    def handle_native(*pkgs):
-        title("Removing native package(s) %s...", pkgs_str())
-        run(AUR_HELPER, "-Rscn", *pkgs)
+    def run(self) -> None:
+        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
 
-    def handle_flatpak(*pkgs):
-        title("Removing Flatpak package(s) %s...", pkgs_str())
-        run("flatpak", "uninstall", "--delete-data", *pkgs)
+        def handle_native(pkgs: list[str]) -> None:
+            title("Installing native package(s) %s...", pkgs_str())
+            run(
+                AUR_HELPER,
+                "-S",
+                *pkgs,
+                *OPT.flag_yes_native(),
+                *OPT.flag_force_native(),
+            )
 
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        def handle_flatpak(pkgs: list[str]) -> None:
+            title("Installing flatpak package(s) %s...", pkgs_str())
+            run(
+                "flatpak",
+                "install",
+                *pkgs,
+                *OPT.flag_yes_flatpak(),
+                *OPT.flag_force_flatpak(),
+            )
 
-
-def subcmd_list(*pkgs):
-    SOURCES.require(defaults=["native", "flatpak"])
-
-    def handle_native(*pkgs):
-        title("Listing native package(s) %s...", pkgs_str())
-        try:
-            run(AUR_HELPER, "-Qs", *pkgs)
-        except subprocess.CalledProcessError:
-            raise AutoError(f"No native packages found with keyword {pkgs_str()}")
-
-    def handle_flatpak(*pkgs):
-        title("Listing Flatpak package(s) %s...", pkgs_str())
-        pkglist = FlatpakList.new_list(*pkgs)
-        if not pkglist.items:
-            raise AutoError(f"No Flatpak packages found with keyword {pkgs_str()}")
-        pkglist.print()
-
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
 
 
-def subcmd_which(*pkgs):
-    SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+class RemoveCmd(Subcommand):
+    name = "remove"
 
-    def handle_native(*pkgs):
-        title("Querying which package provides %s...", pkgs_str())
-        cmd = ["pkgfile", "-v"] if OPT.get('remote') else [AUR_HELPER, "-Qo"]
-        run(*cmd, *pkgs)
+    def run(self) -> None:
+        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
 
-    SOURCES.handle(native=handle_native)
+        def handle_native(pkgs: list[str]) -> None:
+            title("Removing native package(s) %s...", pkgs_str())
+            run(AUR_HELPER, "-Rscn", *pkgs)
 
+        def handle_flatpak(pkgs: list[str]) -> None:
+            title("Removing Flatpak package(s) %s...", pkgs_str())
+            run("flatpak", "uninstall", "--delete-data", *pkgs)
 
-def update_keyring_pkgs():
-    needed_pkgs = []
-    for name in ("archlinux", "manjaro", "chaotic", "archlinuxcn"):
-        pkg = f"{name}-keyring"
-        if not glob.glob(f"/var/lib/pacman/local/{pkg}*"):
-            continue
-        try:
-            run("pacman", "-Qu", pkg)
-        except subprocess.CalledProcessError:
-            continue
-        needed_pkgs.append(pkg)
-    run(AUR_HELPER, "-S", "--needed", *needed_pkgs)
+        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
 
 
-def _git_pull_parallel(paths):
-    threads = []
-    for path in paths:
-        if not os.path.isdir(os.path.join(path, '.git')):
-            continue
-        subtitle("Updating plugin %s...", basename(path))
-        t = threading.Thread(target=lambda p=path: subprocess.run(f"cd {p}; git pull", shell=True))
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join()
+class ListCmd(Subcommand):
+    name = "list"
+
+    def run(self) -> None:
+        SOURCES.require(defaults=["native", "flatpak"])
+
+        def handle_native(pkgs: list[str]) -> None:
+            title("Listing native package(s) %s...", pkgs_str())
+            try:
+                run(AUR_HELPER, "-Qs", *pkgs)
+            except subprocess.CalledProcessError:
+                raise AutoError(f"No native packages found with keyword {pkgs_str()}")
+
+        def handle_flatpak(pkgs: list[str]) -> None:
+            title("Listing Flatpak package(s) %s...", pkgs_str())
+            pkglist = FlatpakList.new_list(*pkgs)
+            if not pkglist.items:
+                raise AutoError(f"No Flatpak packages found with keyword {pkgs_str()}")
+            pkglist.print()
+
+        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
 
 
-def update_zsh_plugins():
-    home = os.environ.get('HOME', '')
-    zplug_path = os.path.join(home, '.zplug')
-    omz_path = os.path.join(home, '.oh-my-zsh')
-    plugin_path = os.environ.get('ZPLUGINDIR', '')
+class WhichCmd(Subcommand):
+    name = "which"
 
-    if os.path.isdir(zplug_path):
-        title("Updating ZPlug plugins...")
-        run("zsh", "-ic", "zplug update")
-    elif os.path.isdir(omz_path):
-        title("Updating Oh-My-Zsh plugins...")
-        run("zsh", "-c", f"{omz_path}/tools/upgrade.sh")
-        custom = os.path.join(omz_path, 'custom')
-        paths = glob.glob(f"{custom}/plugins/*") + glob.glob(f"{custom}/themes/*")
-        _git_pull_parallel(paths)
-    elif plugin_path and os.path.isdir(plugin_path):
-        title("Updating ZSH plugins...")
-        _git_pull_parallel(glob.glob(f"{plugin_path}/*"))
+    def run(self) -> None:
+        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+
+        def handle_native(pkgs: list[str]) -> None:
+            title("Querying which package provides %s...", pkgs_str())
+            cmd = ["pkgfile", "-v"] if OPT.remote else [AUR_HELPER, "-Qo"]
+            run(*cmd, *pkgs)
+
+        SOURCES.handle(native=handle_native)
 
 
-def subcmd_update(*pkgs):
-    SOURCES.require(defaults=["native"] if pkgs else list(Sources.ALL))
+class UpdateCmd(Subcommand):
+    name = "update"
 
-    def handle_native(*pkgs):
-        title("Updating native plugin(s) %s...", pkgs_str())
-        update_keyring_pkgs()
-        flags = ["-S", "--needed", *pkgs] if pkgs else ["-Syu", "--devel"]
-        run(AUR_HELPER, *flags, *flag_yes_native())
-        run(SUDO, "pkgfile", "-u")
+    def run(self) -> None:
+        SOURCES.require(defaults=["native"] if ARGS else list(Sources.ALL))
 
-    def handle_flatpak(*pkgs):
-        title("Updating Flatpak plugin(s) %s...", pkgs_str())
-        run("flatpak", "update", *flag_yes_flatpak(), *FlatpakList.new_list(*pkgs).refs())
+        def handle_native(pkgs: list[str]) -> None:
+            title("Updating native plugin(s) %s...", pkgs_str())
+            update_keyring_pkgs()
+            flags = ["-S", "--needed", *pkgs] if pkgs else ["-Syu", "--devel"]
+            run(AUR_HELPER, *flags, *OPT.flag_yes_native())
+            run(SUDO, "pkgfile", "-u")
 
-    def handle_zsh(*pkgs):
-        if shutil.which('zsh'):
-            update_zsh_plugins()
+        def handle_flatpak(pkgs: list[str]) -> None:
+            title("Updating Flatpak plugin(s) %s...", pkgs_str())
+            run(
+                "flatpak",
+                "update",
+                *OPT.flag_yes_flatpak(),
+                *FlatpakList.new_list(*pkgs).refs(),
+            )
 
-    def handle_vim(*pkgs):
-        if not shutil.which('nvim'):
-            return
-        title("Updating Vim plugins...")
-        run("nvim", "+Lazy! sync", "+qa", "--headless")
-        print("Done.")
+        def handle_zsh(_: list[str]) -> None:
+            if shutil.which("zsh"):
+                update_zsh_plugins()
 
-    SOURCES.handle(native=handle_native, flatpak=handle_flatpak, zsh=handle_zsh, vim=handle_vim)
+        def handle_vim(_: list[str]) -> None:
+            if not shutil.which("nvim"):
+                return
+            title("Updating Vim plugins...")
+            run("nvim", "+Lazy! sync", "+qa", "--headless")
+            print("Done.")
+
+        SOURCES.handle(
+            native=handle_native, flatpak=handle_flatpak, zsh=handle_zsh, vim=handle_vim
+        )
 
 
-def parse_args():
-    global SUBCMD, ARGS
+def parse_args() -> str:
+    global ARGS
 
     if len(sys.argv) < 2:
         raise AutoError("missing subcommand")
 
-    SUBCMD = sys.argv[1]
+    subcmd_name = sys.argv[1]
 
-    if SUBCMD in ('-h', '--help'):
-        subcmd_help()
+    if subcmd_name in ("-h", "--help"):
+        HelpCmd().run()
 
-    import argparse
+    SOURCES.set_context(subcmd_name)
+
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('-n', '--native',  action='store_true')
-    parser.add_argument('-f', '--flatpak', action='store_true')
-    parser.add_argument('-z', '--zsh',     action='store_true')
-    parser.add_argument('-v', '--vim',     action='store_true')
-    parser.add_argument('-e', '--exclude', action='append', default=[])
-    parser.add_argument('-w', '--remote',  action='store_true')
-    parser.add_argument('-x', '--force',   action='store_true')
-    parser.add_argument('-y', '--yes',     action='store_true')
-    parser.add_argument('-h', '--help',    action='store_true')
+    parser.add_argument("-n", "--native", action="store_true")
+    parser.add_argument("-f", "--flatpak", action="store_true")
+    parser.add_argument("-z", "--zsh", action="store_true")
+    parser.add_argument("-v", "--vim", action="store_true")
+    parser.add_argument("-e", "--exclude", action="append", default=[])
+    parser.add_argument("-w", "--remote", action="store_true")
+    parser.add_argument("-x", "--force", action="store_true")
+    parser.add_argument("-y", "--yes", action="store_true")
+    parser.add_argument("-h", "--help", action="store_true")
 
     parsed, remaining = parser.parse_known_args(sys.argv[2:])
 
@@ -499,48 +630,32 @@ def parse_args():
     for exc in parsed.exclude:
         SOURCES.exclude(exc)
 
-    OPT['remote'] = parsed.remote
-    OPT['force'] = parsed.force
-    OPT['yes'] = parsed.yes
+    OPT.remote = parsed.remote
+    OPT.force = parsed.force
+    OPT.yes = parsed.yes
 
     if parsed.help:
-        subcmd_help()
+        HelpCmd().run()
 
     ARGS = remaining
+    return subcmd_name
 
 
-def main():
+def main() -> None:
     global AUR_HELPER, SUDO
 
-    AUR_HELPER = first_of("AUR helpers", 'yay', 'paru', 'pacman')
-    SUDO = first_of("sudo utilities", 'sudo', 'doas', 'pkexec')
+    AUR_HELPER = first_of("AUR helpers", "yay", "paru", "pacman")
+    SUDO = first_of("sudo utilities", "sudo", "doas", "pkexec")
 
-    parse_args()
-
-    subcmds = {
-        'install': subcmd_install,
-        'remove':  subcmd_remove,
-        'search':  subcmd_search,
-        'update':  subcmd_update,
-        'clean':   subcmd_clean,
-        'info':    subcmd_info,
-        'files':   subcmd_files,
-        'which':   subcmd_which,
-        'list':    subcmd_list,
-        'help':    lambda *_: subcmd_help(),
-    }
-
-    handler = subcmds.get(SUBCMD)
-    if handler is None:
-        raise AutoError(f"unknown subcommand '{SUBCMD}'")
-    handler()
+    subcmd_name = parse_args()
+    Subcommand.dispatch(subcmd_name).run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except (AutoError, subprocess.CalledProcessError) as e:
-        msg = str(e).rstrip('\n')
+        msg = str(e).rstrip("\n")
         print(f"\033[1;31merror:\033[0m {msg}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
