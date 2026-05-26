@@ -240,55 +240,6 @@ def github_search(topic: str, *pkgs: str) -> None:
     subprocess.run([gh, "search", "repos", f"--topic={topic}", *pkgs], env=env)
 
 
-def update_keyring_pkgs() -> None:
-    needed_pkgs = []
-    for name in ("archlinux", "manjaro", "chaotic", "archlinuxcn"):
-        pkg = f"{name}-keyring"
-        if not glob.glob(f"/var/lib/pacman/local/{pkg}*"):
-            continue
-        try:
-            run("pacman", "-Qu", pkg)
-        except subprocess.CalledProcessError:
-            continue
-        needed_pkgs.append(pkg)
-    run(AUR_HELPER, "-S", "--needed", *needed_pkgs)
-
-
-def _git_pull_parallel(paths: list[str]) -> None:
-    threads: list[threading.Thread] = []
-    for path in paths:
-        if not os.path.isdir(os.path.join(path, ".git")):
-            continue
-        subtitle("Updating plugin %s...", basename(path))
-        t = threading.Thread(
-            target=lambda p=path: subprocess.run(f"cd {p}; git pull", shell=True)
-        )
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join()
-
-
-def update_zsh_plugins() -> None:
-    home = os.environ.get("HOME", "")
-    zplug_path = os.path.join(home, ".zplug")
-    omz_path = os.path.join(home, ".oh-my-zsh")
-    plugin_path = os.environ.get("ZPLUGINDIR", "")
-
-    if os.path.isdir(zplug_path):
-        title("Updating ZPlug plugins...")
-        run("zsh", "-ic", "zplug update")
-    elif os.path.isdir(omz_path):
-        title("Updating Oh-My-Zsh plugins...")
-        run("zsh", "-c", f"{omz_path}/tools/upgrade.sh")
-        custom = os.path.join(omz_path, "custom")
-        paths = glob.glob(f"{custom}/plugins/*") + glob.glob(f"{custom}/themes/*")
-        _git_pull_parallel(paths)
-    elif plugin_path and os.path.isdir(plugin_path):
-        title("Updating ZSH plugins...")
-        _git_pull_parallel(glob.glob(f"{plugin_path}/*"))
-
-
 class Subcommand(abc.ABC):
     name: ClassVar[str]
     _registry: ClassVar[dict[str, type[Subcommand]]] = {}
@@ -561,13 +512,60 @@ class WhichCmd(Subcommand):
 
 class UpdateCmd(Subcommand):
     name = "update"
+    
+    def update_keyring_pkgs(self) -> None:
+        needed_pkgs = []
+        for name in ("archlinux", "manjaro", "chaotic", "archlinuxcn"):
+            pkg = f"{name}-keyring"
+            if not glob.glob(f"/var/lib/pacman/local/{pkg}*"):
+                continue
+            try:
+                run("pacman", "-Qu", pkg)
+            except subprocess.CalledProcessError:
+                continue
+            needed_pkgs.append(pkg)
+        run(AUR_HELPER, "-S", "--needed", *needed_pkgs)
+        
+    def git_pull_parallel(self, paths: list[str]) -> None:
+        threads: list[threading.Thread] = []
+        for path in paths:
+            if not os.path.isdir(os.path.join(path, ".git")):
+                continue
+            subtitle("Updating plugin %s...", basename(path))
+            t = threading.Thread(
+                target=lambda p=path: subprocess.run(f"cd {p}; git pull", shell=True)
+            )
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+
+
+    def update_zsh_plugins(self) -> None:
+        home = os.environ.get("HOME", "")
+        zplug_path = os.path.join(home, ".zplug")
+        omz_path = os.path.join(home, ".oh-my-zsh")
+        plugin_path = os.environ.get("ZPLUGINDIR", "")
+
+        if os.path.isdir(zplug_path):
+            title("Updating ZPlug plugins...")
+            run("zsh", "-ic", "zplug update")
+        elif os.path.isdir(omz_path):
+            title("Updating Oh-My-Zsh plugins...")
+            run("zsh", "-c", f"{omz_path}/tools/upgrade.sh")
+            custom = os.path.join(omz_path, "custom")
+            paths = glob.glob(f"{custom}/plugins/*") + glob.glob(f"{custom}/themes/*")
+            self.git_pull_parallel(paths)
+        elif plugin_path and os.path.isdir(plugin_path):
+            title("Updating ZSH plugins...")
+            self.git_pull_parallel(glob.glob(f"{plugin_path}/*"))
 
     def run(self) -> None:
         SOURCES.require(defaults=["native"] if ARGS else list(Sources.ALL))
 
         def handle_native(pkgs: list[str]) -> None:
             title("Updating native plugin(s) %s...", pkgs_str())
-            update_keyring_pkgs()
+            self.update_keyring_pkgs()
             flags = ["-S", "--needed", *pkgs] if pkgs else ["-Syu", "--devel"]
             run(AUR_HELPER, *flags, *OPT.flag_yes_native())
             run(SUDO, "pkgfile", "-u")
@@ -583,7 +581,7 @@ class UpdateCmd(Subcommand):
 
         def handle_zsh(_: list[str]) -> None:
             if shutil.which("zsh"):
-                update_zsh_plugins()
+                self.update_zsh_plugins()
 
         def handle_vim(_: list[str]) -> None:
             if not shutil.which("nvim"):
