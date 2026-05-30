@@ -39,8 +39,6 @@ class Options:
 
 OPT = Options()
 ARGS: list[str] = []
-AUR_HELPER: str
-SUDO: str
 
 
 class AutoError(Exception):
@@ -233,16 +231,14 @@ class FlatpakList:
             print(f"    {f['name']}: {f['description']}")
 
 
-def github_search(topic: str, *pkgs: str) -> None:
-    gh = first_of("GitHub CLI", "gh")
-    env = os.environ.copy()
-    env["GH_PAGER"] = ""
-    subprocess.run([gh, "search", "repos", f"--topic={topic}", *pkgs], env=env)
-
-
 class Subcommand(abc.ABC):
     name: ClassVar[str]
     _registry: ClassVar[dict[str, type[Subcommand]]] = {}
+
+    def __init__(self, aur_helper: str, sudo: str) -> None:
+        super().__init__()
+        self.aur_helper = aur_helper
+        self.sudo = sudo
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -250,11 +246,11 @@ class Subcommand(abc.ABC):
             Subcommand._registry[cls.name] = cls
 
     @classmethod
-    def dispatch(cls, name: str) -> Subcommand:
+    def dispatch(cls, name: str, aur_helper: str, sudo: str) -> Subcommand:
         subcls = cls._registry.get(name)
         if subcls is None:
             raise AutoError(f"unknown subcommand '{name}'")
-        return subcls()
+        return subcls(aur_helper, sudo)
 
     @abc.abstractmethod
     def run(self) -> None: ...
@@ -263,10 +259,13 @@ class Subcommand(abc.ABC):
 class HelpCmd(Subcommand):
     name = "help"
 
+    def __init__(self, aur_helper="", sudo=""):
+        super().__init__(aur_helper, sudo)
+
     def run(self) -> NoReturn:
         print("""Usage: auto <command> [options] [packages]
 
-    Available commands:
+Available commands:
     install:    install package(s) (default to native)
     remove:     remove package(s) (default to native)
     search:     search package(s) in remote repositories (default to native and flatpak)
@@ -278,7 +277,7 @@ class HelpCmd(Subcommand):
     list:       list installed packages (default to native and flatpak)
     help:       display this message
 
-    Available options:
+Available options:
     -n, --native:     apply operation on native packages
     -f, --flatpak:    apply operation on flatpak packages
     -v, --vim:        apply operation on vim packages
@@ -303,7 +302,7 @@ class InfoCmd(Subcommand):
             query = "-Sii" if OPT.remote else "-Qii"
             remote = "remote" if OPT.remote else "local"
             try:
-                run(AUR_HELPER, query, *pkgs)
+                run(self.aur_helper, query, *pkgs)
             except subprocess.CalledProcessError:
                 raise AutoError(
                     f"no information found for {remote} package(s) {pkgs_str()}"
@@ -346,7 +345,7 @@ class FilesCmd(Subcommand):
             if OPT.remote:
                 run("pkgfile", "--list", *pkgs)
             else:
-                run(AUR_HELPER, "-Ql", *pkgs)
+                run(self.aur_helper, "-Ql", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
             title("Querying installed files of Flatpak package(s) %s...", pkgs_str())
@@ -367,8 +366,10 @@ class CleanCmd(Subcommand):
             title("Cleaning native packages...")
             subtitle("Removing unneeded packages...")
             try:
-                orphans = [p for p in capture(AUR_HELPER, "-Qdtq").split("\n") if p]
-                run(AUR_HELPER, "-Rscn", *orphans, *OPT.flag_yes_native())
+                orphans = [
+                    p for p in capture(self.aur_helper, "-Qdtq").split("\n") if p
+                ]
+                run(self.aur_helper, "-Rscn", *orphans, *OPT.flag_yes_native())
             except subprocess.CalledProcessError:
                 print("Nothing unused to uninstall")
             downloads = [
@@ -379,9 +380,9 @@ class CleanCmd(Subcommand):
             if downloads:
                 subtitle("Removing pacman download remains...")
                 for d in downloads:
-                    run(SUDO, "rm", "-r", d)
+                    run(self.sudo, "rm", "-r", d)
             subtitle("Cleaning cache...")
-            subprocess.run(f"yes | {AUR_HELPER} -Sccd", shell=True)
+            subprocess.run(f"yes | {self.aur_helper} -Sccd", shell=True)
             print("\nDone cleaning.")
 
         def handle_flatpak(_: list[str]) -> None:
@@ -400,12 +401,18 @@ class CleanCmd(Subcommand):
 class SearchCmd(Subcommand):
     name = "search"
 
+    def github_search(self, topic: str, *pkgs: str) -> None:
+        gh = first_of("GitHub CLI", "gh")
+        env = os.environ.copy()
+        env["GH_PAGER"] = ""
+        subprocess.run([gh, "search", "repos", f"--topic={topic}", *pkgs], env=env)
+
     def run(self) -> None:
         SOURCES.require(defaults=["native", "flatpak"], pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
             title("Searching native package(s) %s...", pkgs_str())
-            run(AUR_HELPER, "-Ss", *pkgs)
+            run(self.aur_helper, "-Ss", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
             title("Searching Flatpak package(s) %s...", pkgs_str())
@@ -416,11 +423,11 @@ class SearchCmd(Subcommand):
 
         def handle_vim(pkgs: list[str]) -> None:
             title("Searching Vim plugins(s) %s...", pkgs_str())
-            github_search("neovim,nvim,vim", *pkgs)
+            self.github_search("neovim,nvim,vim", *pkgs)
 
         def handle_zsh(pkgs: list[str]) -> None:
             title("Searching Zsh plugins(s) %s...", pkgs_str())
-            github_search("zsh", *pkgs)
+            self.github_search("zsh", *pkgs)
 
         SOURCES.handle(
             native=handle_native, flatpak=handle_flatpak, vim=handle_vim, zsh=handle_zsh
@@ -436,7 +443,7 @@ class InstallCmd(Subcommand):
         def handle_native(pkgs: list[str]) -> None:
             title("Installing native package(s) %s...", pkgs_str())
             run(
-                AUR_HELPER,
+                self.aur_helper,
                 "-S",
                 *pkgs,
                 *OPT.flag_yes_native(),
@@ -464,7 +471,7 @@ class RemoveCmd(Subcommand):
 
         def handle_native(pkgs: list[str]) -> None:
             title("Removing native package(s) %s...", pkgs_str())
-            run(AUR_HELPER, "-Rscn", *pkgs)
+            run(self.aur_helper, "-Rscn", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
             title("Removing Flatpak package(s) %s...", pkgs_str())
@@ -482,7 +489,7 @@ class ListCmd(Subcommand):
         def handle_native(pkgs: list[str]) -> None:
             title("Listing native package(s) %s...", pkgs_str())
             try:
-                run(AUR_HELPER, "-Qs", *pkgs)
+                run(self.aur_helper, "-Qs", *pkgs)
             except subprocess.CalledProcessError:
                 raise AutoError(f"No native packages found with keyword {pkgs_str()}")
 
@@ -504,7 +511,7 @@ class WhichCmd(Subcommand):
 
         def handle_native(pkgs: list[str]) -> None:
             title("Querying which package provides %s...", pkgs_str())
-            cmd = ["pkgfile", "-v"] if OPT.remote else [AUR_HELPER, "-Qo"]
+            cmd = ["pkgfile", "-v"] if OPT.remote else [self.aur_helper, "-Qo"]
             run(*cmd, *pkgs)
 
         SOURCES.handle(native=handle_native)
@@ -512,7 +519,7 @@ class WhichCmd(Subcommand):
 
 class UpdateCmd(Subcommand):
     name = "update"
-    
+
     def update_keyring_pkgs(self) -> None:
         needed_pkgs = []
         for name in ("archlinux", "manjaro", "chaotic", "archlinuxcn"):
@@ -524,8 +531,8 @@ class UpdateCmd(Subcommand):
             except subprocess.CalledProcessError:
                 continue
             needed_pkgs.append(pkg)
-        run(AUR_HELPER, "-S", "--needed", *needed_pkgs)
-        
+        run(self.aur_helper, "-S", "--needed", *needed_pkgs)
+
     def git_pull_parallel(self, paths: list[str]) -> None:
         threads: list[threading.Thread] = []
         for path in paths:
@@ -539,7 +546,6 @@ class UpdateCmd(Subcommand):
             threads.append(t)
         for t in threads:
             t.join()
-
 
     def update_zsh_plugins(self) -> None:
         home = os.environ.get("HOME", "")
@@ -567,8 +573,8 @@ class UpdateCmd(Subcommand):
             title("Updating native plugin(s) %s...", pkgs_str())
             self.update_keyring_pkgs()
             flags = ["-S", "--needed", *pkgs] if pkgs else ["-Syu", "--devel"]
-            run(AUR_HELPER, *flags, *OPT.flag_yes_native())
-            run(SUDO, "pkgfile", "-u")
+            run(self.aur_helper, *flags, *OPT.flag_yes_native())
+            run(self.sudo, "pkgfile", "-u")
 
         def handle_flatpak(pkgs: list[str]) -> None:
             title("Updating Flatpak plugin(s) %s...", pkgs_str())
@@ -640,13 +646,12 @@ def parse_args() -> str:
 
 
 def main() -> None:
-    global AUR_HELPER, SUDO
-
-    AUR_HELPER = first_of("AUR helpers", "yay", "paru", "pacman")
-    SUDO = first_of("sudo utilities", "sudo", "doas", "pkexec")
+    aur_helper = first_of("AUR helpers", "yay", "paru", "pacman")
+    sudo = first_of("sudo utilities", "sudo", "doas", "pkexec")
 
     subcmd_name = parse_args()
-    Subcommand.dispatch(subcmd_name).run()
+    subcmd = Subcommand.dispatch(subcmd_name, aur_helper, sudo)
+    subcmd.run()
 
 
 if __name__ == "__main__":
