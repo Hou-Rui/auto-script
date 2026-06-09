@@ -342,7 +342,7 @@ class FilesCmd(Subcommand):
 
         def handle_native(pkgs: list[str]) -> None:
             title("Querying installed files of native package(s) %s...", pkgs_str())
-            if OPT.remote:
+            if OPT.remote and shutil.which("pkgfile"):
                 run("pkgfile", "--list", *pkgs)
             else:
                 run(self.aur_helper, "-Ql", *pkgs)
@@ -510,8 +510,12 @@ class WhichCmd(Subcommand):
         SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
+
             title("Querying which package provides %s...", pkgs_str())
-            cmd = ["pkgfile", "-v"] if OPT.remote else [self.aur_helper, "-Qo"]
+            if OPT.remote and shutil.which("pkgfile"):
+                cmd = ["pkgfile", "-v"]
+            else:
+                cmd = [self.aur_helper, "-Qo"]
             run(*cmd, *pkgs)
 
         SOURCES.handle(native=handle_native)
@@ -531,7 +535,8 @@ class UpdateCmd(Subcommand):
             except subprocess.CalledProcessError:
                 continue
             needed_pkgs.append(pkg)
-        run(self.aur_helper, "-S", "--needed", *needed_pkgs)
+        if needed_pkgs:
+            run(self.aur_helper, "-S", "--needed", *needed_pkgs)
 
     def git_pull_parallel(self, paths: list[str]) -> None:
         threads: list[threading.Thread] = []
@@ -566,15 +571,23 @@ class UpdateCmd(Subcommand):
             title("Updating ZSH plugins...")
             self.git_pull_parallel(glob.glob(f"{plugin_path}/*"))
 
+    def aur_helper_flags(self, pkgs: list[str]) -> list[str]:
+        if pkgs:
+            return ["-S", "--needed", *pkgs]
+        if self.aur_helper == "pacman":
+            return ["-Syu"]
+        return ["-Syu", "--devel"]
+
     def run(self) -> None:
         SOURCES.require(defaults=["native"] if ARGS else list(Sources.ALL))
 
         def handle_native(pkgs: list[str]) -> None:
             title("Updating native plugin(s) %s...", pkgs_str())
             self.update_keyring_pkgs()
-            flags = ["-S", "--needed", *pkgs] if pkgs else ["-Syu", "--devel"]
+            flags = self.aur_helper_flags(pkgs)
             run(self.aur_helper, *flags, *OPT.flag_yes_native())
-            run(self.sudo, "pkgfile", "-u")
+            if shutil.which("pkgfile"):
+                run(self.sudo, "pkgfile", "-u")
 
         def handle_flatpak(pkgs: list[str]) -> None:
             title("Updating Flatpak plugin(s) %s...", pkgs_str())
