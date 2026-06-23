@@ -13,7 +13,7 @@ import subprocess
 import threading
 import argparse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from os.path import basename
 from typing import ClassVar, NoReturn
 
@@ -37,10 +37,6 @@ class Options:
         return ["--reinstall"] if self.force else []
 
 
-OPT = Options()
-ARGS: list[str] = []
-
-
 class AutoError(Exception):
     _HINT = "type 'auto help' to see usage."
 
@@ -58,10 +54,10 @@ class SubcmdError(AutoError):
 class Sources:
     ALL = ("native", "flatpak", "zsh", "vim")
 
-    def __init__(self) -> None:
+    def __init__(self, context: str = "") -> None:
         self._active: set[str] = set()
         self._excluded: set[str] = set()
-        self._context: str = ""
+        self._context = context
 
     def __len__(self) -> int:
         return len(self._active)
@@ -71,9 +67,6 @@ class Sources:
 
     def __str__(self) -> str:
         return ", ".join(s for s in self.ALL if s in self._active)
-
-    def set_context(self, name: str) -> None:
-        self._context = name
 
     def _error(self, msg: str) -> SubcmdError:
         return SubcmdError(self._context, msg)
@@ -88,6 +81,7 @@ class Sources:
 
     def require(
         self,
+        args: list[str],
         defaults: list[str] | None = None,
         exclusive: bool = False,
         pkgs: bool = False,
@@ -96,23 +90,38 @@ class Sources:
             self._active = set(defaults)
         if exclusive and len(self) != 1:
             raise self._error(f"multiple sources {self} specified")
-        if pkgs and not ARGS:
+        if pkgs and not args:
             raise self._error("no packages specified")
 
-    def handle(self, **handlers: Callable[[list[str]], None]) -> None:
+    def handle(
+        self, args: list[str], **handlers: Callable[[list[str]], None]
+    ) -> None:
         for src in self.ALL:
             if src not in self._active:
                 continue
             if src not in handlers:
                 raise self._error(f"source(s) {self} not applicable")
             if src not in self._excluded:
-                handlers[src](ARGS)
+                handlers[src](args)
             self._active.discard(src)
         if self._active:
             raise self._error(f"source(s) {self} not applicable")
 
 
-SOURCES = Sources()
+@dataclass
+class Context:
+    """Per-invocation state: parsed options, package arguments, selected sources
+    and the resolved external tools. Created once during parsing and passed to
+    the dispatched subcommand."""
+
+    opts: Options = field(default_factory=Options)
+    args: list[str] = field(default_factory=list)
+    sources: Sources = field(default_factory=Sources)
+    aur_helper: str = ""
+    sudo: str = ""
+
+    def pkgs_str(self) -> str:
+        return ", ".join(self.args)
 
 
 def run(*args: str) -> None:
@@ -123,10 +132,6 @@ def run(*args: str) -> None:
 
 def capture(*args: str) -> str:
     return subprocess.run(list(args), capture_output=True, text=True, check=True).stdout
-
-
-def pkgs_str() -> str:
-    return ", ".join(ARGS)
 
 
 def first_of(desc: str, *cmds: str) -> str:
@@ -231,39 +236,7 @@ class FlatpakList:
             print(f"    {f['name']}: {f['description']}")
 
 
-class Subcommand(abc.ABC):
-    name: ClassVar[str]
-    _registry: ClassVar[dict[str, type[Subcommand]]] = {}
-
-    def __init__(self, aur_helper: str, sudo: str) -> None:
-        super().__init__()
-        self.aur_helper = aur_helper
-        self.sudo = sudo
-
-    def __init_subclass__(cls, **kwargs: object) -> None:
-        super().__init_subclass__(**kwargs)
-        if hasattr(cls, "name"):
-            Subcommand._registry[cls.name] = cls
-
-    @classmethod
-    def dispatch(cls, name: str, aur_helper: str, sudo: str) -> Subcommand:
-        subcls = cls._registry.get(name)
-        if subcls is None:
-            raise AutoError(f"unknown subcommand '{name}'")
-        return subcls(aur_helper, sudo)
-
-    @abc.abstractmethod
-    def run(self) -> None: ...
-
-
-class HelpCmd(Subcommand):
-    name = "help"
-
-    def __init__(self, aur_helper="", sudo=""):
-        super().__init__(aur_helper, sudo)
-
-    def run(self) -> NoReturn:
-        print("""Usage: auto <command> [options] [packages]
+HELP_TEXT = """Usage: auto <command> [options] [packages]
 
 Available commands:
     install:    install package(s) (default to native)
@@ -287,80 +260,123 @@ Available options:
     -w, --remote:     (only for info and which) display or query remote info
     -x, --force:      (only for install) force options
     -h, --help:       display this message
-  """)
-        sys.exit(0)
+  """
+
+
+def print_help() -> NoReturn:
+    print(HELP_TEXT)
+    sys.exit(0)
+
+
+class Subcommand(abc.ABC):
+    name: ClassVar[str]
+    _registry: ClassVar[dict[str, type[Subcommand]]] = {}
+
+    def __init__(self, ctx: Context) -> None:
+        super().__init__()
+        self.ctx = ctx
+        self.opts = ctx.opts
+        self.args = ctx.args
+        self.sources = ctx.sources
+        self.aur_helper = ctx.aur_helper
+        self.sudo = ctx.sudo
+
+    def pkgs_str(self) -> str:
+        return self.ctx.pkgs_str()
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if hasattr(cls, "name"):
+            Subcommand._registry[cls.name] = cls
+
+    @classmethod
+    def dispatch(cls, name: str, ctx: Context) -> Subcommand:
+        subcls = cls._registry.get(name)
+        if subcls is None:
+            raise AutoError(f"unknown subcommand '{name}'")
+        return subcls(ctx)
+
+    @abc.abstractmethod
+    def run(self) -> None: ...
+
+
+class HelpCmd(Subcommand):
+    name = "help"
+
+    def run(self) -> NoReturn:
+        print_help()
 
 
 class InfoCmd(Subcommand):
     name = "info"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+        self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Querying information on native package(s) %s...", pkgs_str())
-            query = "-Sii" if OPT.remote else "-Qii"
-            remote = "remote" if OPT.remote else "local"
+            title("Querying information on native package(s) %s...", self.pkgs_str())
+            query = "-Sii" if self.opts.remote else "-Qii"
+            remote = "remote" if self.opts.remote else "local"
             try:
                 run(self.aur_helper, query, *pkgs)
             except subprocess.CalledProcessError:
                 raise AutoError(
-                    f"no information found for {remote} package(s) {pkgs_str()}"
+                    f"no information found for {remote} package(s) {self.pkgs_str()}"
                 )
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            remote = "remote" if OPT.remote else "local"
+            remote = "remote" if self.opts.remote else "local"
             title(
                 "Querying information on %s Flatpak package(s) %s...",
                 remote,
-                pkgs_str(),
+                self.pkgs_str(),
             )
-            if OPT.remote:
+            if self.opts.remote:
                 pkglist = FlatpakList.new_search(*pkgs).reversed()
             else:
                 pkglist = FlatpakList.new_list(*pkgs)
             if not pkglist.items:
                 raise AutoError(
-                    f"No information found for {remote} Flatpak package {pkgs_str()}"
+                    f"No information found for {remote} Flatpak package {self.pkgs_str()}"
                 )
             for pkg in pkglist.items:
                 appid = pkg["application"]
                 subtitle("Querying %s information for %s...", remote, appid)
-                if OPT.remote:
+                if self.opts.remote:
                     run("flatpak", "remote-info", pkg["remotes"], appid)
                 else:
                     run("flatpak", "info", appid)
 
-        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
 
 
 class FilesCmd(Subcommand):
     name = "files"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+        self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Querying installed files of native package(s) %s...", pkgs_str())
-            if OPT.remote and shutil.which("pkgfile"):
+            title("Querying installed files of native package(s) %s...", self.pkgs_str())
+            if self.opts.remote and shutil.which("pkgfile"):
                 run("pkgfile", "--list", *pkgs)
             else:
                 run(self.aur_helper, "-Ql", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Querying installed files of Flatpak package(s) %s...", pkgs_str())
+            title("Querying installed files of Flatpak package(s) %s...", self.pkgs_str())
             for ref in FlatpakList.new_list(*pkgs).refs():
                 path = capture("flatpak", "info", "-l", ref).strip()
                 run("tree", path)
 
-        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
 
 
 class CleanCmd(Subcommand):
     name = "clean"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native", "flatpak"])
+        self.sources.require(self.args, defaults=["native", "flatpak"])
 
         def handle_native(_: list[str]) -> None:
             title("Cleaning native packages...")
@@ -369,7 +385,7 @@ class CleanCmd(Subcommand):
                 orphans = [
                     p for p in capture(self.aur_helper, "-Qdtq").split("\n") if p
                 ]
-                run(self.aur_helper, "-Rscn", *orphans, *OPT.flag_yes_native())
+                run(self.aur_helper, "-Rscn", *orphans, *self.opts.flag_yes_native())
             except subprocess.CalledProcessError:
                 print("Nothing unused to uninstall")
             downloads = [
@@ -392,10 +408,10 @@ class CleanCmd(Subcommand):
                 "uninstall",
                 "--unused",
                 "--delete-data",
-                *OPT.flag_yes_flatpak(),
+                *self.opts.flag_yes_flatpak(),
             )
 
-        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
 
 
 class SearchCmd(Subcommand):
@@ -408,29 +424,33 @@ class SearchCmd(Subcommand):
         subprocess.run([gh, "search", "repos", f"--topic={topic}", *pkgs], env=env)
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native", "flatpak"], pkgs=True)
+        self.sources.require(self.args, defaults=["native", "flatpak"], pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Searching native package(s) %s...", pkgs_str())
+            title("Searching native package(s) %s...", self.pkgs_str())
             run(self.aur_helper, "-Ss", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Searching Flatpak package(s) %s...", pkgs_str())
+            title("Searching Flatpak package(s) %s...", self.pkgs_str())
             try:
                 FlatpakList.new_search(*pkgs).print()
             except Exception:
                 pass
 
         def handle_vim(pkgs: list[str]) -> None:
-            title("Searching Vim plugins(s) %s...", pkgs_str())
+            title("Searching Vim plugins(s) %s...", self.pkgs_str())
             self.github_search("neovim,nvim,vim", *pkgs)
 
         def handle_zsh(pkgs: list[str]) -> None:
-            title("Searching Zsh plugins(s) %s...", pkgs_str())
+            title("Searching Zsh plugins(s) %s...", self.pkgs_str())
             self.github_search("zsh", *pkgs)
 
-        SOURCES.handle(
-            native=handle_native, flatpak=handle_flatpak, vim=handle_vim, zsh=handle_zsh
+        self.sources.handle(
+            self.args,
+            native=handle_native,
+            flatpak=handle_flatpak,
+            vim=handle_vim,
+            zsh=handle_zsh,
         )
 
 
@@ -438,87 +458,86 @@ class InstallCmd(Subcommand):
     name = "install"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+        self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Installing native package(s) %s...", pkgs_str())
+            title("Installing native package(s) %s...", self.pkgs_str())
             run(
                 self.aur_helper,
                 "-S",
                 *pkgs,
-                *OPT.flag_yes_native(),
-                *OPT.flag_force_native(),
+                *self.opts.flag_yes_native(),
+                *self.opts.flag_force_native(),
             )
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Installing flatpak package(s) %s...", pkgs_str())
+            title("Installing flatpak package(s) %s...", self.pkgs_str())
             run(
                 "flatpak",
                 "install",
                 *pkgs,
-                *OPT.flag_yes_flatpak(),
-                *OPT.flag_force_flatpak(),
+                *self.opts.flag_yes_flatpak(),
+                *self.opts.flag_force_flatpak(),
             )
 
-        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
 
 
 class RemoveCmd(Subcommand):
     name = "remove"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+        self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Removing native package(s) %s...", pkgs_str())
+            title("Removing native package(s) %s...", self.pkgs_str())
             run(self.aur_helper, "-Rscn", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Removing Flatpak package(s) %s...", pkgs_str())
+            title("Removing Flatpak package(s) %s...", self.pkgs_str())
             run("flatpak", "uninstall", "--delete-data", *pkgs)
 
-        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
 
 
 class ListCmd(Subcommand):
     name = "list"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native", "flatpak"])
+        self.sources.require(self.args, defaults=["native", "flatpak"])
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Listing native package(s) %s...", pkgs_str())
+            title("Listing native package(s) %s...", self.pkgs_str())
             try:
                 run(self.aur_helper, "-Qs", *pkgs)
             except subprocess.CalledProcessError:
-                raise AutoError(f"No native packages found with keyword {pkgs_str()}")
+                raise AutoError(f"No native packages found with keyword {self.pkgs_str()}")
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Listing Flatpak package(s) %s...", pkgs_str())
+            title("Listing Flatpak package(s) %s...", self.pkgs_str())
             pkglist = FlatpakList.new_list(*pkgs)
             if not pkglist.items:
-                raise AutoError(f"No Flatpak packages found with keyword {pkgs_str()}")
+                raise AutoError(f"No Flatpak packages found with keyword {self.pkgs_str()}")
             pkglist.print()
 
-        SOURCES.handle(native=handle_native, flatpak=handle_flatpak)
+        self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
 
 
 class WhichCmd(Subcommand):
     name = "which"
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native"], exclusive=True, pkgs=True)
+        self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-
-            title("Querying which package provides %s...", pkgs_str())
-            if OPT.remote and shutil.which("pkgfile"):
+            title("Querying which package provides %s...", self.pkgs_str())
+            if self.opts.remote and shutil.which("pkgfile"):
                 cmd = ["pkgfile", "-v"]
             else:
                 cmd = [self.aur_helper, "-Qo"]
             run(*cmd, *pkgs)
 
-        SOURCES.handle(native=handle_native)
+        self.sources.handle(self.args, native=handle_native)
 
 
 class UpdateCmd(Subcommand):
@@ -579,22 +598,24 @@ class UpdateCmd(Subcommand):
         return ["-Syu", "--devel"]
 
     def run(self) -> None:
-        SOURCES.require(defaults=["native"] if ARGS else list(Sources.ALL))
+        self.sources.require(
+            self.args, defaults=["native"] if self.args else list(Sources.ALL)
+        )
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Updating native plugin(s) %s...", pkgs_str())
+            title("Updating native plugin(s) %s...", self.pkgs_str())
             self.update_keyring_pkgs()
             flags = self.aur_helper_flags(pkgs)
-            run(self.aur_helper, *flags, *OPT.flag_yes_native())
+            run(self.aur_helper, *flags, *self.opts.flag_yes_native())
             if shutil.which("pkgfile"):
                 run(self.sudo, "pkgfile", "-u")
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Updating Flatpak plugin(s) %s...", pkgs_str())
+            title("Updating Flatpak plugin(s) %s...", self.pkgs_str())
             run(
                 "flatpak",
                 "update",
-                *OPT.flag_yes_flatpak(),
+                *self.opts.flag_yes_flatpak(),
                 *FlatpakList.new_list(*pkgs).refs(),
             )
 
@@ -609,23 +630,23 @@ class UpdateCmd(Subcommand):
             run("nvim", "+lua vim.pack.update()", "+qa", "--headless")
             print("Done.")
 
-        SOURCES.handle(
-            native=handle_native, flatpak=handle_flatpak, zsh=handle_zsh, vim=handle_vim
+        self.sources.handle(
+            self.args,
+            native=handle_native,
+            flatpak=handle_flatpak,
+            zsh=handle_zsh,
+            vim=handle_vim,
         )
 
 
-def parse_args() -> str:
-    global ARGS
-
-    if len(sys.argv) < 2:
+def parse_args(argv: list[str], aur_helper: str, sudo: str) -> tuple[str, Context]:
+    if len(argv) < 2:
         raise AutoError("missing subcommand")
 
-    subcmd_name = sys.argv[1]
+    subcmd_name = argv[1]
 
     if subcmd_name in ("-h", "--help"):
-        HelpCmd().run()
-
-    SOURCES.set_context(subcmd_name)
+        print_help()
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-n", "--native", action="store_true")
@@ -638,32 +659,35 @@ def parse_args() -> str:
     parser.add_argument("-y", "--yes", action="store_true")
     parser.add_argument("-h", "--help", action="store_true")
 
-    parsed, remaining = parser.parse_known_args(sys.argv[2:])
-
-    for src in Sources.ALL:
-        if getattr(parsed, src):
-            SOURCES.enable(src)
-
-    for exc in parsed.exclude:
-        SOURCES.exclude(exc)
-
-    OPT.remote = parsed.remote
-    OPT.force = parsed.force
-    OPT.yes = parsed.yes
+    parsed, remaining = parser.parse_known_args(argv[2:])
 
     if parsed.help:
-        HelpCmd().run()
+        print_help()
 
-    ARGS = remaining
-    return subcmd_name
+    sources = Sources(context=subcmd_name)
+    for src in Sources.ALL:
+        if getattr(parsed, src):
+            sources.enable(src)
+    for exc in parsed.exclude:
+        sources.exclude(exc)
+
+    opts = Options(yes=parsed.yes, force=parsed.force, remote=parsed.remote)
+    ctx = Context(
+        opts=opts,
+        args=remaining,
+        sources=sources,
+        aur_helper=aur_helper,
+        sudo=sudo,
+    )
+    return subcmd_name, ctx
 
 
 def main() -> None:
     aur_helper = first_of("AUR helpers", "yay", "paru", "pacman")
     sudo = first_of("sudo utilities", "sudo", "doas", "pkexec")
 
-    subcmd_name = parse_args()
-    subcmd = Subcommand.dispatch(subcmd_name, aur_helper, sudo)
+    subcmd_name, ctx = parse_args(sys.argv, aur_helper, sudo)
+    subcmd = Subcommand.dispatch(subcmd_name, ctx)
     subcmd.run()
 
 
