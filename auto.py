@@ -627,7 +627,8 @@ class UpdateCmd(Subcommand):
             if not shutil.which("nvim"):
                 return
             title("Updating Vim plugins...")
-            run("nvim", "+lua vim.pack.update()", "+qa", "--headless")
+            update_cmd = "+lua vim.pack.update(nil, { force = true })"
+            run("nvim", update_cmd, "+qa", "--headless")
             print("Done.")
 
         self.sources.handle(
