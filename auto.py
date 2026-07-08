@@ -594,8 +594,8 @@ class UpdateCmd(Subcommand):
         if pkgs:
             return ["-S", "--needed", *pkgs]
         if self.aur_helper == "pacman":
-            return ["-Syu"]
-        return ["-Syu", "--devel"]
+            return ["-Su"]
+        return ["-Su", "--devel"]
 
     def run(self) -> None:
         self.sources.require(
@@ -604,6 +604,7 @@ class UpdateCmd(Subcommand):
 
         def handle_native(pkgs: list[str]) -> None:
             title("Updating native plugin(s) %s...", self.pkgs_str())
+            run(self.aur_helper, "-Sy")
             self.update_keyring_pkgs()
             flags = self.aur_helper_flags(pkgs)
             run(self.aur_helper, *flags, *self.opts.flag_yes_native())
