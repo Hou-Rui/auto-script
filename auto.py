@@ -153,8 +153,7 @@ def colored(text: str, style: str) -> str:
     return f"{codes.get(style, '')}{text}\033[0m"
 
 
-def title(fmt: str, *args: object) -> None:
-    text = fmt % args if args else fmt
+def title(text: str) -> None:
     cols = shutil.get_terminal_size().columns
     pad = (cols - len(text) - 2) / 2
     s1 = colored("⎼" * max(0, max(1, math.floor(pad)) - 1), "dark white")
@@ -162,8 +161,7 @@ def title(fmt: str, *args: object) -> None:
     print(f" {s1} {colored(text, 'bold')} {s2} ")
 
 
-def subtitle(fmt: str, *args: object) -> None:
-    text = fmt % args if args else fmt
+def subtitle(text: str) -> None:
     print(colored(":: ", "bold blue") + colored(text, "bold"))
 
 
@@ -314,7 +312,7 @@ class InfoCmd(Subcommand):
         self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Querying information on native package(s) %s...", self.pkgs_str())
+            title(f"Querying information on native package(s) {self.pkgs_str()}...")
             query = "-Sii" if self.opts.remote else "-Qii"
             remote = "remote" if self.opts.remote else "local"
             try:
@@ -327,9 +325,7 @@ class InfoCmd(Subcommand):
         def handle_flatpak(pkgs: list[str]) -> None:
             remote = "remote" if self.opts.remote else "local"
             title(
-                "Querying information on %s Flatpak package(s) %s...",
-                remote,
-                self.pkgs_str(),
+                f"Querying information on {remote} Flatpak package(s) {self.pkgs_str()}..."
             )
             if self.opts.remote:
                 pkglist = FlatpakList.new_search(*pkgs).reversed()
@@ -341,7 +337,7 @@ class InfoCmd(Subcommand):
                 )
             for pkg in pkglist.items:
                 appid = pkg["application"]
-                subtitle("Querying %s information for %s...", remote, appid)
+                subtitle(f"Querying {remote} information for {appid}...")
                 if self.opts.remote:
                     run("flatpak", "remote-info", pkg["remotes"], appid)
                 else:
@@ -357,14 +353,14 @@ class FilesCmd(Subcommand):
         self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Querying installed files of native package(s) %s...", self.pkgs_str())
+            title(f"Querying installed files of native package(s) {self.pkgs_str()}...")
             if self.opts.remote and shutil.which("pkgfile"):
                 run("pkgfile", "--list", *pkgs)
             else:
                 run(self.aur_helper, "-Ql", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Querying installed files of Flatpak package(s) %s...", self.pkgs_str())
+            title(f"Querying installed files of Flatpak package(s) {self.pkgs_str()}...")
             for ref in FlatpakList.new_list(*pkgs).refs():
                 path = capture("flatpak", "info", "-l", ref).strip()
                 run("tree", path)
@@ -427,22 +423,22 @@ class SearchCmd(Subcommand):
         self.sources.require(self.args, defaults=["native", "flatpak"], pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Searching native package(s) %s...", self.pkgs_str())
+            title(f"Searching native package(s) {self.pkgs_str()}...")
             run(self.aur_helper, "-Ss", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Searching Flatpak package(s) %s...", self.pkgs_str())
+            title(f"Searching Flatpak package(s) {self.pkgs_str()}...")
             try:
                 FlatpakList.new_search(*pkgs).print()
             except Exception:
                 pass
 
         def handle_vim(pkgs: list[str]) -> None:
-            title("Searching Vim plugins(s) %s...", self.pkgs_str())
+            title(f"Searching Vim plugins(s) {self.pkgs_str()}...")
             self.github_search("neovim,nvim,vim", *pkgs)
 
         def handle_zsh(pkgs: list[str]) -> None:
-            title("Searching Zsh plugins(s) %s...", self.pkgs_str())
+            title(f"Searching Zsh plugins(s) {self.pkgs_str()}...")
             self.github_search("zsh", *pkgs)
 
         self.sources.handle(
@@ -461,7 +457,7 @@ class InstallCmd(Subcommand):
         self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Installing native package(s) %s...", self.pkgs_str())
+            title(f"Installing native package(s) {self.pkgs_str()}...")
             run(
                 self.aur_helper,
                 "-S",
@@ -471,7 +467,7 @@ class InstallCmd(Subcommand):
             )
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Installing flatpak package(s) %s...", self.pkgs_str())
+            title(f"Installing flatpak package(s) {self.pkgs_str()}...")
             run(
                 "flatpak",
                 "install",
@@ -490,11 +486,11 @@ class RemoveCmd(Subcommand):
         self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Removing native package(s) %s...", self.pkgs_str())
+            title(f"Removing native package(s) {self.pkgs_str()}...")
             run(self.aur_helper, "-Rscn", *pkgs)
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Removing Flatpak package(s) %s...", self.pkgs_str())
+            title(f"Removing Flatpak package(s) {self.pkgs_str()}...")
             run("flatpak", "uninstall", "--delete-data", *pkgs)
 
         self.sources.handle(self.args, native=handle_native, flatpak=handle_flatpak)
@@ -507,14 +503,14 @@ class ListCmd(Subcommand):
         self.sources.require(self.args, defaults=["native", "flatpak"])
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Listing native package(s) %s...", self.pkgs_str())
+            title(f"Listing native package(s) {self.pkgs_str()}...")
             try:
                 run(self.aur_helper, "-Qs", *pkgs)
             except subprocess.CalledProcessError:
                 raise AutoError(f"No native packages found with keyword {self.pkgs_str()}")
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Listing Flatpak package(s) %s...", self.pkgs_str())
+            title(f"Listing Flatpak package(s) {self.pkgs_str()}...")
             pkglist = FlatpakList.new_list(*pkgs)
             if not pkglist.items:
                 raise AutoError(f"No Flatpak packages found with keyword {self.pkgs_str()}")
@@ -530,7 +526,7 @@ class WhichCmd(Subcommand):
         self.sources.require(self.args, defaults=["native"], exclusive=True, pkgs=True)
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Querying which package provides %s...", self.pkgs_str())
+            title(f"Querying which package provides {self.pkgs_str()}...")
             if self.opts.remote and shutil.which("pkgfile"):
                 cmd = ["pkgfile", "-v"]
             else:
@@ -562,7 +558,7 @@ class UpdateCmd(Subcommand):
         for path in paths:
             if not os.path.isdir(os.path.join(path, ".git")):
                 continue
-            subtitle("Updating plugin %s...", basename(path))
+            subtitle(f"Updating plugin {basename(path)}...")
             t = threading.Thread(
                 target=lambda p=path: subprocess.run(f"cd {p}; git pull", shell=True)
             )
@@ -603,7 +599,7 @@ class UpdateCmd(Subcommand):
         )
 
         def handle_native(pkgs: list[str]) -> None:
-            title("Updating native plugin(s) %s...", self.pkgs_str())
+            title(f"Updating native plugin(s) {self.pkgs_str()}...")
             run(self.aur_helper, "-Sy")
             self.update_keyring_pkgs()
             flags = self.aur_helper_flags(pkgs)
@@ -612,7 +608,7 @@ class UpdateCmd(Subcommand):
                 run(self.sudo, "pkgfile", "-u")
 
         def handle_flatpak(pkgs: list[str]) -> None:
-            title("Updating Flatpak plugin(s) %s...", self.pkgs_str())
+            title(f"Updating Flatpak plugin(s) {self.pkgs_str()}...")
             run(
                 "flatpak",
                 "update",

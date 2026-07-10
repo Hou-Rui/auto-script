@@ -2,3 +2,4 @@ build/
 local/
 fatlib/
 .vscode/
+__pycache__/
