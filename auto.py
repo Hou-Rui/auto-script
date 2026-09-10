@@ -234,35 +234,73 @@ class FlatpakList:
             print(f"    {f['name']}: {f['description']}")
 
 
-HELP_TEXT = """Usage: auto <command> [options] [packages]
+COMMANDS = [
+    ("install", "install package(s) (default to native)"),
+    ("remove", "remove package(s) (default to native)"),
+    ("search", "search package(s) in remote repositories (default to native and flatpak)"),
+    ("update", "update package(s) (default to native, flatpak, zsh, vim)"),
+    ("clean", "clean cache and unused packages (default to native and flatpak)"),
+    ("info", "display info for a package (default to native)"),
+    ("files", "list installed files for a package (default to native)"),
+    ("which", "query which package owns an executable (default to native)"),
+    ("list", "list installed packages (default to native and flatpak)"),
+    ("help", "display this message"),
+]
 
-Available commands:
-    install:    install package(s) (default to native)
-    remove:     remove package(s) (default to native)
-    search:     search package(s) in remote repositories (default to native and flatpak)
-    update:     update package(s) (default to native, flatpak, zsh, vim)
-    clean:      clean cache and unused packages (default to native and flatpak)
-    info:       display info for a package (default to native)
-    files:      list installed files for a package (default to native)
-    which:      query which package owns an executable (default to native)
-    list:       list installed packages (default to native and flatpak)
-    help:       display this message
 
-Available options:
-    -n, --native:     apply operation on native packages
-    -f, --flatpak:    apply operation on flatpak packages
-    -v, --vim:        apply operation on vim packages
-    -z, --zsh:        apply operation on zsh packages
-    -e, --exclude:    exclude a specific source
-    -y, --yes:        skip all confirmation
-    -w, --remote:     (only for info and which) display or query remote info
-    -x, --force:      (only for install) force options
-    -h, --help:       display this message
-  """
+# (short, long, help, arg_choices). arg_choices is None for a plain flag, or the
+# list of values the option expects (making it a value-taking option).
+OPTIONS = [
+    ("-n", "--native", "apply operation on native packages", None),
+    ("-f", "--flatpak", "apply operation on flatpak packages", None),
+    ("-v", "--vim", "apply operation on vim packages", None),
+    ("-z", "--zsh", "apply operation on zsh packages", None),
+    ("-e", "--exclude", "exclude a specific source", list(Sources.ALL)),
+    ("-y", "--yes", "skip all confirmation", None),
+    ("-w", "--remote", "(only for info and which) display or query remote info", None),
+    ("-x", "--force", "(only for install) force options", None),
+    ("-h", "--help", "display this message", None),
+]
+
+
+def _add_options(parser: argparse.ArgumentParser) -> None:
+    for short, long, help_text, choices in OPTIONS:
+        if choices is None:
+            parser.add_argument(short, long, action="store_true", help=help_text)
+        else:
+            parser.add_argument(short, long, action="append", default=[], help=help_text)
+
+
+def print_completions(kind: str) -> NoReturn:
+    """Emit machine-readable completion metadata consumed by the zsh `_auto`
+    completion so it never drifts from the definitions above."""
+    if kind == "commands":
+        for name, desc in COMMANDS:
+            print(f"{name}:{desc}")
+    elif kind == "options":
+        for short, long, help_text, choices in OPTIONS:
+            arg = " ".join(choices) if choices else ""
+            print(f"{short} {long}\t{help_text}\t{arg}")
+    sys.exit(0)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="auto", add_help=False)
+    _add_options(parser)
+    return parser
 
 
 def print_help() -> NoReturn:
-    print(HELP_TEXT)
+    parser = argparse.ArgumentParser(
+        prog="auto",
+        usage="auto <command> [options] [packages]",
+        add_help=False,
+    )
+    commands = parser.add_argument_group("commands")
+    for name, desc in COMMANDS:
+        commands.add_argument(name, nargs="?", help=desc)
+    _add_options(parser)
+    parser.print_help()
     sys.exit(0)
 
 
@@ -643,20 +681,13 @@ def parse_args(argv: list[str], aur_helper: str, sudo: str) -> tuple[str, Contex
 
     subcmd_name = argv[1]
 
+    if subcmd_name == "__complete":
+        print_completions(argv[2] if len(argv) > 2 else "")
+
     if subcmd_name in ("-h", "--help"):
         print_help()
 
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("-n", "--native", action="store_true")
-    parser.add_argument("-f", "--flatpak", action="store_true")
-    parser.add_argument("-z", "--zsh", action="store_true")
-    parser.add_argument("-v", "--vim", action="store_true")
-    parser.add_argument("-e", "--exclude", action="append", default=[])
-    parser.add_argument("-w", "--remote", action="store_true")
-    parser.add_argument("-x", "--force", action="store_true")
-    parser.add_argument("-y", "--yes", action="store_true")
-    parser.add_argument("-h", "--help", action="store_true")
-
+    parser = build_parser()
     parsed, remaining = parser.parse_known_args(argv[2:])
 
     if parsed.help:

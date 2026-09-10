@@ -1,20 +1,36 @@
 #compdef auto
 
+# Command and option definitions are sourced from auto.py itself (see its
+# `__complete` output) so this completion never drifts from the tool.
+
 local line state subcmd
-_arguments -C "1: :->cmds" "*::arg:->args"
+local -a specs
+
+local optline
+local -a parts names
+local desc arg short long
+for optline in ${(f)"$(auto __complete options)"}; do
+  parts=("${(@ps.\t.)optline}")
+  names=("${(@s. .)parts[1]}")
+  desc="${parts[2]}"
+  arg="${parts[3]}"
+  short="${names[1]}"
+  long="${names[2]}"
+  if [[ -n $arg ]]; then
+    specs+=("*${short}[${desc}]:source:(${arg})")
+    specs+=("*${long}[${desc}]:source:(${arg})")
+  else
+    specs+=("(${short} ${long})${short}[${desc}]")
+    specs+=("(${long} ${short})${long}[${desc}]")
+  fi
+done
+
+_arguments -C "${specs[@]}" "1: :->cmds" "*::arg:->args"
 case "$state" in
   (cmds)
-    _values 'auto command' \
-            'install[install package(s) (default to native)]' \
-            'remove[remove package(s) (default to native)]' \
-            'search[search package(s) in remote repositories (default to native and flatpak)]' \
-            'update[update package(s) (default to native, flatpak, zsh, vim)]' \
-            'clean[clean cache and unused packages (default to native and flatpak)]' \
-            'info[display info for a package (default to native)]' \
-            'files[list installed files for a package (default to native)]' \
-            'which[query which package owns an executable (default to native)]' \
-            'list[list installed packages (default to native and flatpak)]' \
-            'help[display this message]' ;;
+    local -a cmds
+    cmds=(${(f)"$(auto __complete commands)"})
+    _describe 'auto command' cmds ;;
   (args)
     subcmd="$line[1]"
     (( $+functions[_auto_$subcmd] )) && _auto_$subcmd;;
