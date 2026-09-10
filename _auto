@@ -5,6 +5,7 @@
 
 local line state subcmd
 local -a specs
+local -A opt_args
 
 local optline
 local -a parts names
@@ -61,19 +62,48 @@ for pkg in db.pkgcache:
   _describe "packages" pkgs
 }
 
-_auto_install() { _auto_remote_packages }
+# True when the user already passed -f/--flatpak on the command line, in which
+# case package completion should target Flatpak instead of the native source.
+_auto_flatpak_selected() {
+  (( $+opt_args[-f] || $+opt_args[--flatpak] ))
+}
 
-_auto_update() { _auto_local_packages }
+_auto_flatpak_remote_packages() {
+  local -a pkgs
+  pkgs=(${(f)"$(flatpak remote-ls --app --columns=application,name 2>/dev/null)"})
+  pkgs=(${pkgs//$'\t'/:})
+  _describe "flatpak packages" pkgs
+}
 
-_auto_search() { _auto_remote_packages }
+_auto_flatpak_local_packages() {
+  local -a pkgs
+  pkgs=(${(f)"$(flatpak list --app --columns=application,name 2>/dev/null)"})
+  pkgs=(${pkgs//$'\t'/:})
+  _describe "flatpak packages" pkgs
+}
 
-_auto_remove() { _auto_local_packages }
+# Complete remote packages, targeting Flatpak when -f/--flatpak is set.
+_auto_remote_dispatch() {
+  if _auto_flatpak_selected; then _auto_flatpak_remote_packages; else _auto_remote_packages; fi
+}
+
+# Complete local packages, targeting Flatpak when -f/--flatpak is set.
+_auto_local_dispatch() {
+  if _auto_flatpak_selected; then _auto_flatpak_local_packages; else _auto_local_packages; fi
+}
+
+_auto_install() { _auto_remote_dispatch }
+
+_auto_update() { _auto_local_dispatch }
+
+_auto_search() { _auto_remote_dispatch }
+
+_auto_remove() { _auto_local_dispatch }
 
 _auto_clean() { }
 
 _auto_which() { _path_commands }
 
-_auto_info() { _auto_local_packages }
+_auto_info() { _auto_local_dispatch }
 
-_auto_files() { _auto_local_packages }
-
+_auto_files() { _auto_local_dispatch }
